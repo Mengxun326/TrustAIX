@@ -11,6 +11,11 @@ services:
     volumes:
       - ./config/policy.yaml:/app/config/policy.yaml:ro
       - trustaix_data:/data
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
 
 volumes:
   trustaix_data:

@@ -2,12 +2,15 @@
 
 import os
 import logging
+import csv
+import io
+import json
 from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from trustaix.audit import AuditRepository
@@ -138,6 +141,51 @@ def audit_events(
     principal: Principal = Depends(require_roles(Role.AUDITOR, Role.ADMIN)),
 ) -> list[AuditEvent]:
     return service.audit_repository.latest(limit, tenant_id=principal.tenant_id)
+
+
+@app.get("/v1/audit-events/export")
+def export_audit_events(
+    format: str = Query(default="csv", pattern="^(csv|json)$"),
+    limit: int = Query(default=1_000, ge=1, le=10_000),
+    principal: Principal = Depends(require_roles(Role.AUDITOR, Role.ADMIN)),
+) -> Response:
+    events = service.audit_repository.latest(limit, tenant_id=principal.tenant_id)
+    if format == "json":
+        return Response(
+            json.dumps([event.model_dump(mode="json") for event in events], ensure_ascii=False),
+            media_type="application/json",
+            headers={"Content-Disposition": "attachment; filename=trustaix-audit.json"},
+        )
+
+    stream = io.StringIO()
+    writer = csv.DictWriter(
+        stream,
+        fieldnames=[
+            "event_id", "evaluated_at", "tenant_id", "actor_id", "policy_version_id", "action",
+            "risk_score", "finding_rules", "feedback_verdict", "feedback_note",
+        ],
+    )
+    writer.writeheader()
+    for event in events:
+        writer.writerow(
+            {
+                "event_id": event.event_id,
+                "evaluated_at": event.evaluated_at,
+                "tenant_id": event.tenant_id,
+                "actor_id": event.actor_id or "",
+                "policy_version_id": event.policy_version_id or "",
+                "action": event.action.value,
+                "risk_score": event.risk_score,
+                "finding_rules": ";".join(finding.rule_id for finding in event.findings),
+                "feedback_verdict": event.feedback.verdict.value if event.feedback else "",
+                "feedback_note": event.feedback.note if event.feedback else "",
+            }
+        )
+    return Response(
+        "\ufeff" + stream.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": "attachment; filename=trustaix-audit.csv"},
+    )
 
 
 @app.get("/v1/analytics")

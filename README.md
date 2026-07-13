@@ -99,6 +99,7 @@ Streaming (`stream: true`) is deliberately unsupported in v0.2, because TrustAIX
 | `POST /v1/evaluate` | Evaluate a prompt and/or model response |
 | `POST /v1/chat/completions` | Evaluate, proxy, and re-evaluate a non-streaming chat completion |
 | `GET /v1/audit-events` | Read recent audit events |
+| `GET /v1/audit-events/export?format=csv` | Export a tenant-scoped audit report as CSV or JSON |
 | `POST /v1/audit-events/{event_id}/feedback` | Confirm a decision or mark it as a false positive |
 | `GET /v1/analytics` | Read aggregate actions, category hits, and false-positive count |
 | `GET /v1/policy` | Read the active non-secret policy settings |
@@ -142,6 +143,12 @@ docker compose up --build
 ```
 
 The service is available at `http://127.0.0.1:8010`; its SQLite audit database is kept in a named Docker volume. The Compose file defaults to DeepSeek's OpenAI-compatible endpoint. Set `OPENAI_BASE_URL` before startup to use another compatible provider.
+
+The image runs as an unprivileged `trustaix` user, includes a health check, and Compose enables a read-only application filesystem. Mount only the `/data` volume for audit persistence.
+
+## Versioned policy workflow
+
+Administrators can use `POST /v1/policy-versions` to create a full policy-document draft, `POST /v1/policy-versions/{id}/submit` to submit it, and a different administrator can call `POST /v1/policy-versions/{id}/approve` to activate it. `POST /v1/policy-versions/{id}/rollback` creates a reviewable draft from a historical version. Use `GET /v1/policy-versions` to inspect history.
 
 ## Project layout
 
