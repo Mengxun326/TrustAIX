@@ -1,9 +1,9 @@
 """Public request and response models."""
 
 from enum import StrEnum
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class RiskLevel(StrEnum):
@@ -53,3 +53,27 @@ class EvaluationResult(BaseModel):
 class AuditEvent(EvaluationResult):
     prompt_length: int
     response_length: int
+
+
+class ChatMessage(BaseModel):
+    """A permissive subset of an OpenAI-compatible chat message."""
+
+    model_config = ConfigDict(extra="allow")
+
+    role: str
+    content: str | list[dict[str, Any]] | None = None
+
+
+class ChatCompletionRequest(BaseModel):
+    """A non-streaming OpenAI-compatible Chat Completions request."""
+
+    model_config = ConfigDict(extra="allow")
+
+    model: str
+    messages: list[ChatMessage] = Field(min_length=1)
+    stream: bool = False
+    trustaix_request_id: str | None = Field(default=None, max_length=128)
+
+    def upstream_payload(self) -> dict[str, Any]:
+        """Keep TrustAIX metadata local rather than forwarding it upstream."""
+        return self.model_dump(mode="json", exclude={"trustaix_request_id"}, exclude_none=True)

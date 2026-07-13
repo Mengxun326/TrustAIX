@@ -29,8 +29,18 @@ def test_pii_requires_redaction() -> None:
     assert response.status_code == 200
     assert body["action"] == "redact"
     assert body["findings"][0]["category"] == "pii"
+    assert body["findings"][0]["evidence"] == "[REDACTED_EMAIL]"
 
 
 def test_empty_request_is_rejected() -> None:
     response = client.post("/v1/evaluate", json={"prompt": "", "response": ""})
     assert response.status_code == 422
+
+
+def test_streaming_is_rejected_before_an_upstream_call() -> None:
+    response = client.post(
+        "/v1/chat/completions",
+        json={"model": "example-model", "messages": [{"role": "user", "content": "Hello"}], "stream": True},
+    )
+    assert response.status_code == 400
+    assert "Streaming is not supported" in response.json()["detail"]["message"]
