@@ -50,13 +50,24 @@ def test_empty_request_is_rejected() -> None:
     assert response.status_code == 422
 
 
-def test_streaming_is_rejected_before_an_upstream_call() -> None:
-    response = client.post(
-        "/v1/chat/completions",
-        json={"model": "example-model", "messages": [{"role": "user", "content": "Hello"}], "stream": True},
-    )
-    assert response.status_code == 400
-    assert "Streaming is not supported" in response.json()["detail"]["message"]
+def test_streaming_uses_a_buffered_safe_path_before_release(monkeypatch) -> None:
+    class FakeGateway:
+        def complete_buffered_stream(self, *args, **kwargs):
+            yield "data: {\"choices\": []}\n\n"
+            yield "data: [DONE]\n\n"
+
+    original_gateway = main.chat_gateway
+    main.chat_gateway = FakeGateway()
+    try:
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "example-model", "messages": [{"role": "user", "content": "Hello"}], "stream": True},
+        )
+    finally:
+        main.chat_gateway = original_gateway
+    assert response.status_code == 200
+    assert response.headers["x-trustaix-streaming"] == "buffered-safe"
+    assert response.text.endswith("data: [DONE]\n\n")
 
 
 def test_analytics_and_feedback() -> None:

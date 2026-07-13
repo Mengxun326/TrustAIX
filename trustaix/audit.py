@@ -3,22 +3,31 @@
 import json
 import sqlite3
 from datetime import UTC, datetime
-from pathlib import Path
 
 from trustaix.models import AuditEvent, AuditFeedback, FeedbackRequest
 
 
 class AuditRepository:
     def __init__(self, database_path: str = "trustaix.db") -> None:
-        self.database_path = Path(database_path)
+        self.database_path = database_path
+        self.is_postgres = database_path.startswith(("postgres://", "postgresql://"))
         self._initialize()
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self):
+        if self.is_postgres:
+            try:
+                import psycopg
+            except ImportError as error:  # pragma: no cover - optional dependency
+                raise RuntimeError("Install TrustAIX with the 'postgres' extra to use PostgreSQL.") from error
+            return psycopg.connect(self.database_path)
         return sqlite3.connect(self.database_path)
+
+    def _execute(self, connection, query: str, values=()):
+        return connection.execute(query.replace("?", "%s") if self.is_postgres else query, values)
 
     def _initialize(self) -> None:
         with self._connect() as connection:
-            connection.execute(
+            self._execute(connection,
                 """
                 CREATE TABLE IF NOT EXISTS audit_events (
                     event_id TEXT PRIMARY KEY,
@@ -28,12 +37,12 @@ class AuditRepository:
                 )
                 """
             )
-            columns = {row[1] for row in connection.execute("PRAGMA table_info(audit_events)")}
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(audit_events)")} if not self.is_postgres else {"tenant_id"}
             if "tenant_id" not in columns:
-                connection.execute(
+                self._execute(connection,
                     "ALTER TABLE audit_events ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"
                 )
-            connection.execute(
+            self._execute(connection,
                 """
                 CREATE TABLE IF NOT EXISTS audit_feedback (
                     event_id TEXT PRIMARY KEY,
@@ -46,18 +55,18 @@ class AuditRepository:
 
     def save(self, event: AuditEvent) -> None:
         with self._connect() as connection:
-            connection.execute(
+            self._execute(connection,
                 "INSERT INTO audit_events(event_id, payload, evaluated_at, tenant_id) VALUES (?, ?, ?, ?)",
                 (event.event_id, event.model_dump_json(), event.evaluated_at, event.tenant_id),
             )
 
     def latest(self, limit: int = 50, tenant_id: str = "default") -> list[AuditEvent]:
         with self._connect() as connection:
-            rows = connection.execute(
+            rows = self._execute(connection,
                 "SELECT payload FROM audit_events WHERE tenant_id = ? ORDER BY evaluated_at DESC LIMIT ?",
                 (tenant_id, limit),
             ).fetchall()
-        events = [AuditEvent.model_validate(json.loads(row[0])) for row in rows]
+        events = [AuditEvent.model_validate(row[0] if isinstance(row[0], dict) else json.loads(row[0])) for row in rows]
         feedback = self._feedback_for([event.event_id for event in events])
         return [event.model_copy(update={"feedback": feedback.get(event.event_id)}) for event in events]
 
@@ -65,13 +74,13 @@ class AuditRepository:
         self, event_id: str, feedback: FeedbackRequest, tenant_id: str = "default"
     ) -> AuditFeedback | None:
         with self._connect() as connection:
-            exists = connection.execute(
+            exists = self._execute(connection,
                 "SELECT 1 FROM audit_events WHERE event_id = ? AND tenant_id = ?", (event_id, tenant_id)
             ).fetchone()
             if not exists:
                 return None
             updated_at = datetime.now(UTC).isoformat()
-            connection.execute(
+            self._execute(connection,
                 """
                 INSERT INTO audit_feedback(event_id, verdict, note, updated_at)
                 VALUES (?, ?, ?, ?)
@@ -102,12 +111,22 @@ class AuditRepository:
             "false_positives": false_positives,
         }
 
+    def purge_before(self, before: datetime, tenant_id: str | None = None) -> int:
+        """Delete expired audit records; callers must enforce an admin retention policy."""
+        query = "DELETE FROM audit_events WHERE evaluated_at < ?"
+        values: list[str] = [before.astimezone(UTC).isoformat()]
+        if tenant_id is not None:
+            query += " AND tenant_id = ?"
+            values.append(tenant_id)
+        with self._connect() as connection:
+            return self._execute(connection, query, values).rowcount
+
     def _feedback_for(self, event_ids: list[str]) -> dict[str, AuditFeedback]:
         if not event_ids:
             return {}
-        placeholders = ",".join("?" for _ in event_ids)
+        placeholders = ",".join("%s" if self.is_postgres else "?" for _ in event_ids)
         with self._connect() as connection:
-            rows = connection.execute(
+            rows = self._execute(connection,
                 f"SELECT event_id, verdict, note, updated_at FROM audit_feedback WHERE event_id IN ({placeholders})",
                 event_ids,
             ).fetchall()

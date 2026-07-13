@@ -4,7 +4,6 @@ import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 from uuid import uuid4
 
 from trustaix.config import PolicyProfile, policy_document, policy_from_document
@@ -41,15 +40,25 @@ class PolicyVersion:
 
 class PolicyVersionRepository:
     def __init__(self, database_path: str) -> None:
-        self.database_path = Path(database_path)
+        self.database_path = database_path
+        self.is_postgres = database_path.startswith(("postgres://", "postgresql://"))
         self._initialize()
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self):
+        if self.is_postgres:
+            try:
+                import psycopg
+            except ImportError as error:  # pragma: no cover - optional dependency
+                raise RuntimeError("Install TrustAIX with the 'postgres' extra to use PostgreSQL.") from error
+            return psycopg.connect(self.database_path)
         return sqlite3.connect(self.database_path)
+
+    def _execute(self, connection, query: str, values=()):
+        return connection.execute(query.replace("?", "%s") if self.is_postgres else query, values)
 
     def _initialize(self) -> None:
         with self._connect() as connection:
-            connection.execute(
+            self._execute(connection,
                 """
                 CREATE TABLE IF NOT EXISTS policy_versions (
                     id TEXT PRIMARY KEY,
@@ -89,11 +98,11 @@ class PolicyVersionRepository:
             raise ValueError("A policy author cannot approve their own version.")
         approved_at = datetime.now(UTC).isoformat()
         with self._connect() as connection:
-            connection.execute(
+            self._execute(connection,
                 "UPDATE policy_versions SET status = 'superseded' WHERE tenant_id = ? AND status = 'active'",
                 (tenant_id,),
             )
-            connection.execute(
+            self._execute(connection,
                 "UPDATE policy_versions SET status = 'active', approved_by = ?, approved_at = ? WHERE id = ?",
                 (approver_id, approved_at, version_id),
             )
@@ -107,7 +116,7 @@ class PolicyVersionRepository:
 
     def active(self, tenant_id: str) -> PolicyVersion | None:
         with self._connect() as connection:
-            row = connection.execute(
+            row = self._execute(connection,
                 "SELECT * FROM policy_versions WHERE tenant_id = ? AND status = 'active' ORDER BY approved_at DESC LIMIT 1",
                 (tenant_id,),
             ).fetchone()
@@ -115,14 +124,14 @@ class PolicyVersionRepository:
 
     def get(self, version_id: str, tenant_id: str) -> PolicyVersion | None:
         with self._connect() as connection:
-            row = connection.execute(
+            row = self._execute(connection,
                 "SELECT * FROM policy_versions WHERE id = ? AND tenant_id = ?", (version_id, tenant_id)
             ).fetchone()
         return self._row(row) if row else None
 
     def list(self, tenant_id: str, limit: int = 50) -> list[PolicyVersion]:
         with self._connect() as connection:
-            rows = connection.execute(
+            rows = self._execute(connection,
                 "SELECT * FROM policy_versions WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ?",
                 (tenant_id, limit),
             ).fetchall()
@@ -130,7 +139,7 @@ class PolicyVersionRepository:
 
     def _transition(self, version_id: str, tenant_id: str, current: str, new: str) -> PolicyVersion | None:
         with self._connect() as connection:
-            updated = connection.execute(
+            updated = self._execute(connection,
                 "UPDATE policy_versions SET status = ? WHERE id = ? AND tenant_id = ? AND status = ?",
                 (new, version_id, tenant_id, current),
             ).rowcount
@@ -145,7 +154,7 @@ class PolicyVersionRepository:
             approved_by=approver_id, approved_at=datetime.now(UTC).isoformat() if approver_id else None,
         )
         with self._connect() as connection:
-            connection.execute(
+            self._execute(connection,
                 "INSERT INTO policy_versions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (version.id, version.tenant_id, json.dumps(version.document), version.status, version.created_by,
                  version.created_at, version.note, version.parent_id, version.approved_by, version.approved_at),
@@ -155,6 +164,6 @@ class PolicyVersionRepository:
     @staticmethod
     def _row(row: tuple) -> PolicyVersion:
         return PolicyVersion(
-            id=row[0], tenant_id=row[1], document=json.loads(row[2]), status=row[3], created_by=row[4],
+            id=row[0], tenant_id=row[1], document=row[2] if isinstance(row[2], dict) else json.loads(row[2]), status=row[3], created_by=row[4],
             created_at=row[5], note=row[6], parent_id=row[7], approved_by=row[8], approved_at=row[9],
         )

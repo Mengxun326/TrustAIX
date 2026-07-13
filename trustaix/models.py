@@ -27,7 +27,7 @@ class FeedbackVerdict(StrEnum):
 
 class Finding(BaseModel):
     rule_id: str
-    category: Literal["prompt_injection", "pii", "secret", "content_policy", "citation"]
+    category: Literal["prompt_injection", "pii", "secret", "content_policy", "citation", "custom"]
     level: RiskLevel
     message: str
     evidence: str

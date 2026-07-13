@@ -1,0 +1,7 @@
+# A team-owned rule package loaded via TRUSTAIX_RULE_PACKS=/run/secrets/team-rules.yaml
+rules:
+  - id: TEAM-001
+    terms: ["internal-only", "confidential roadmap"]
+    level: high
+    category: custom
+    message: "Content matches an organization-specific governance rule."

@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY pyproject.toml README.md LICENSE ./
 COPY trustaix ./trustaix
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir ".[postgres]"
 
 COPY config ./config
 

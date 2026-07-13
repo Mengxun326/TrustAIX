@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels: { app: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels: { app: {{ .Release.Name }} }
+    spec:
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: trustaix
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          ports: [{ containerPort: 8000 }]
+          env:
+            - name: OPENAI_API_KEY
+              valueFrom: { secretKeyRef: { name: {{ .Values.secrets.existingSecret }}, key: {{ .Values.secrets.openaiApiKeyKey }} } }
+            - name: TRUSTAIX_AUTH_ENABLED
+              value: "true"
+            - name: TRUSTAIX_AUTH_CONFIG
+              value: /run/secrets/access.yaml
+            - name: TRUSTAIX_AUDIT_DB
+              value: /data/trustaix.db
+          volumeMounts:
+            - { name: access, mountPath: /run/secrets, readOnly: true }
+            - { name: data, mountPath: /data }
+          readinessProbe: { httpGet: { path: /health, port: 8000 } }
+          livenessProbe: { httpGet: { path: /health, port: 8000 } }
+          securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: ["ALL"] } }
+      volumes:
+        - name: access
+          secret: { secretName: {{ .Values.secrets.existingSecret }}, items: [{ key: {{ .Values.secrets.accessConfigKey }}, path: access.yaml }] }
+        - name: data
+          emptyDir: {}
