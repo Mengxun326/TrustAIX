@@ -39,6 +39,8 @@ uvicorn trustaix.main:app --reload
 
 Open `http://127.0.0.1:8000/docs` for interactive API documentation.
 
+Open `http://127.0.0.1:8000/` for the built-in Risk Console. It lets you run evaluations, inspect the latest audit events, and view the active policy without installing a separate frontend application.
+
 To use the chat proxy with OpenAI, provide your key through the environment. TrustAIX never stores this value.
 
 ```powershell

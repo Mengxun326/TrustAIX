@@ -1,8 +1,11 @@
 """FastAPI application for TrustAIX."""
 
 import os
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from trustaix.audit import AuditRepository
 from trustaix.gateway import (
@@ -16,8 +19,15 @@ from trustaix.models import AuditEvent, ChatCompletionRequest, EvaluationRequest
 from trustaix.service import EvaluationService
 
 app = FastAPI(title="TrustAIX", version="0.1.0", description="LLM risk-control gateway")
+web_directory = Path(__file__).parent / "web"
+app.mount("/static", StaticFiles(directory=web_directory), name="static")
 service = EvaluationService(AuditRepository(os.getenv("TRUSTAIX_AUDIT_DB", "trustaix.db")))
 chat_gateway = ChatGatewayService(service, OpenAICompatibleClient())
+
+
+@app.get("/", include_in_schema=False)
+def dashboard() -> FileResponse:
+    return FileResponse(web_directory / "index.html")
 
 
 @app.get("/health")

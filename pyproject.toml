@@ -32,3 +32,6 @@ target-version = "py311"
 
 [tool.setuptools.packages.find]
 include = ["trustaix*"]
+
+[tool.setuptools.package-data]
+trustaix = ["web/*"]

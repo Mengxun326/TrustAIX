@@ -11,6 +11,12 @@ def test_health() -> None:
     assert response.json() == {"status": "ok"}
 
 
+def test_dashboard_is_served() -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "TrustAIX" in response.text
+
+
 def test_prompt_injection_is_blocked() -> None:
     response = client.post(
         "/v1/evaluate",
