@@ -1,0 +1,27 @@
+# TrustAIX default policy profile. Set TRUSTAIX_POLICY_PATH to this file (or a copy)
+# to activate it. Changes require a service restart.
+rules:
+  # Use null to enable every bundled detector, or list only the IDs to enable.
+  enabled: null
+
+scoring:
+  low: 10
+  medium: 25
+  high: 50
+  critical: 100
+
+enforcement:
+  # Findings at or above this aggregate score are flagged for manual review.
+  review_score: 50
+  # These categories are returned only after sensitive values have been replaced.
+  redact_categories:
+    - pii
+    - secret
+  block:
+    # A critical finding always blocks the request.
+    critical: true
+    # Findings in these categories block at this risk level or higher.
+    categories:
+      - prompt_injection
+      - content_policy
+    minimum_level: high

@@ -4,14 +4,16 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from trustaix.audit import AuditRepository
+from trustaix.config import PolicyProfile, load_policy_from_environment
 from trustaix.detectors import ContentPolicyDetector, PromptInjectionDetector, SensitiveDataDetector
 from trustaix.models import AuditEvent, EvaluationRequest, EvaluationResult
 from trustaix.policies import decide, risk_score
 
 
 class EvaluationService:
-    def __init__(self, audit_repository: AuditRepository) -> None:
+    def __init__(self, audit_repository: AuditRepository, policy: PolicyProfile | None = None) -> None:
         self.audit_repository = audit_repository
+        self.policy = policy or load_policy_from_environment()
         self.detectors = (PromptInjectionDetector(), SensitiveDataDetector(), ContentPolicyDetector())
 
     def evaluate(self, request: EvaluationRequest) -> EvaluationResult:
@@ -20,12 +22,13 @@ class EvaluationService:
             if text.strip():
                 for detector in self.detectors:
                     findings.extend(detector.detect(text, location))
+        findings = [finding for finding in findings if self.policy.allows(finding)]
 
         event = AuditEvent(
             event_id=str(uuid4()),
             request_id=request.request_id,
-            action=decide(findings),
-            risk_score=risk_score(findings),
+            action=decide(findings, self.policy),
+            risk_score=risk_score(findings, self.policy),
             findings=findings,
             evaluated_at=datetime.now(UTC).isoformat(),
             prompt_length=len(request.prompt),

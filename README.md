@@ -95,6 +95,27 @@ Streaming (`stream: true`) is deliberately unsupported in v0.2, because TrustAIX
 | `POST /v1/evaluate` | Evaluate a prompt and/or model response |
 | `POST /v1/chat/completions` | Evaluate, proxy, and re-evaluate a non-streaming chat completion |
 | `GET /v1/audit-events` | Read recent audit events |
+| `GET /v1/policy` | Read the active non-secret policy settings |
+
+## Configure risk policy
+
+The bundled [policy profile](config/policy.yaml) controls enabled rules, risk weights, review thresholds, redaction categories, and blocking conditions. To use it locally:
+
+```powershell
+$env:TRUSTAIX_POLICY_PATH = "config/policy.yaml"
+```
+
+Copy this file before editing it for a specific deployment. For example, `rules.enabled` can limit enforcement to explicit rule IDs, while `enforcement.review_score` changes the aggregate score required for a review decision. Restart the service after any policy change.
+
+## Run with Docker
+
+With `OPENAI_API_KEY` already set in your terminal, start a containerized gateway with:
+
+```powershell
+docker compose up --build
+```
+
+The service is available at `http://127.0.0.1:8010`; its SQLite audit database is kept in a named Docker volume. The Compose file defaults to DeepSeek's OpenAI-compatible endpoint. Set `OPENAI_BASE_URL` before startup to use another compatible provider.
 
 ## Project layout
 
@@ -121,9 +142,9 @@ trustaix/
 
 - [x] OpenAI-compatible non-streaming proxy
 - [x] Input and output PII redaction
-- [ ] YAML policy profiles and tenant-specific thresholds
+- [x] YAML policy profile with configurable rules and thresholds
+- [x] Docker deployment and GitHub Actions test workflow
 - [ ] Rule explanations and false-positive feedback
-- [ ] Docker image and CI workflow
 
 ### v0.3 — Production integrations
 

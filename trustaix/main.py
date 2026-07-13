@@ -1,5 +1,7 @@
 """FastAPI application for TrustAIX."""
 
+import os
+
 from fastapi import FastAPI, HTTPException, Query
 
 from trustaix.audit import AuditRepository
@@ -14,7 +16,7 @@ from trustaix.models import AuditEvent, ChatCompletionRequest, EvaluationRequest
 from trustaix.service import EvaluationService
 
 app = FastAPI(title="TrustAIX", version="0.1.0", description="LLM risk-control gateway")
-service = EvaluationService(AuditRepository())
+service = EvaluationService(AuditRepository(os.getenv("TRUSTAIX_AUDIT_DB", "trustaix.db")))
 chat_gateway = ChatGatewayService(service, OpenAICompatibleClient())
 
 
@@ -53,3 +55,9 @@ def chat_completions(request: ChatCompletionRequest) -> dict:
 @app.get("/v1/audit-events", response_model=list[AuditEvent])
 def audit_events(limit: int = Query(default=50, ge=1, le=100)) -> list[AuditEvent]:
     return service.audit_repository.latest(limit)
+
+
+@app.get("/v1/policy")
+def policy() -> dict:
+    """Return the active risk-policy settings without exposing any secret values."""
+    return service.policy.public_dict()
