@@ -39,6 +39,22 @@ class SensitiveDataDetector:
             "API key pattern detected.",
             "[REDACTED_API_KEY]",
         ),
+        (
+            "SEC-002",
+            "secret",
+            RiskLevel.CRITICAL,
+            r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b",
+            "GitHub token pattern detected.",
+            "[REDACTED_GITHUB_TOKEN]",
+        ),
+        (
+            "SEC-003",
+            "secret",
+            RiskLevel.CRITICAL,
+            r"\bAKIA[0-9A-Z]{16}\b",
+            "AWS access key ID pattern detected.",
+            "[REDACTED_AWS_ACCESS_KEY]",
+        ),
     )
 
     def detect(self, text: str, location: str) -> list[Finding]:
