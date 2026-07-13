@@ -1,0 +1,17 @@
+groups:
+  - name: trustaix
+    rules:
+      - alert: TrustAIXHighBlockRate
+        expr: sum(rate(trustaix_evaluations_total{action="block"}[10m])) / clamp_min(sum(rate(trustaix_evaluations_total[10m])), 1) > 0.15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: TrustAIX is blocking more than 15% of evaluated traffic.
+      - alert: TrustAIXServerErrors
+        expr: sum(rate(trustaix_http_requests_total{status=~"5.."}[5m])) > 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: TrustAIX is returning server errors.

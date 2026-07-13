@@ -1,7 +1,10 @@
 """FastAPI application for TrustAIX."""
 
 import os
+import logging
 from pathlib import Path
+from time import perf_counter
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -27,9 +30,11 @@ from trustaix.models import (
     PolicyVersionDraftRequest,
 )
 from trustaix.policy_store import PolicyVersion, PolicyVersionRepository
+from trustaix.observability import MetricsRegistry
 from trustaix.service import EvaluationService
 
 app = FastAPI(title="TrustAIX", version="0.1.0", description="LLM risk-control gateway")
+logger = logging.getLogger("trustaix")
 web_directory = Path(__file__).parent / "web"
 app.mount("/static", StaticFiles(directory=web_directory), name="static")
 database_path = os.getenv("TRUSTAIX_AUDIT_DB", "trustaix.db")
@@ -37,6 +42,26 @@ service = EvaluationService(AuditRepository(database_path))
 chat_gateway = ChatGatewayService(service, OpenAICompatibleClient())
 auth_service = AuthService.from_environment()
 policy_versions = PolicyVersionRepository(database_path)
+metrics = MetricsRegistry()
+service.on_evaluation = metrics.record_evaluation
+
+
+@app.middleware("http")
+async def observe_request(request, call_next):
+    request_id = request.headers.get("X-Request-ID", str(uuid4()))
+    started = perf_counter()
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    metrics.record_request(request.method, request.url.path, response.status_code)
+    logger.info(
+        "request_completed request_id=%s method=%s path=%s status=%s duration_ms=%.1f",
+        request_id,
+        request.method,
+        request.url.path,
+        response.status_code,
+        (perf_counter() - started) * 1000,
+    )
+    return response
 
 
 @app.get("/", include_in_schema=False)
@@ -118,6 +143,13 @@ def audit_events(
 @app.get("/v1/analytics")
 def analytics(principal: Principal = Depends(require_roles(Role.AUDITOR, Role.ADMIN))) -> dict:
     return service.audit_repository.analytics(tenant_id=principal.tenant_id)
+
+
+@app.get("/metrics", include_in_schema=False)
+def prometheus_metrics(principal: Principal = Depends(require_roles(Role.ADMIN))):
+    from fastapi.responses import PlainTextResponse
+
+    return PlainTextResponse(metrics.render_prometheus(), media_type="text/plain; version=0.0.4")
 
 
 @app.post("/v1/audit-events/{event_id}/feedback", response_model=AuditFeedback)

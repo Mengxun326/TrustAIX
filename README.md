@@ -129,6 +129,10 @@ $env:TRUSTAIX_ADMIN_TOKEN = "replace-with-a-long-random-token"
 
 Clients pass a token in `Authorization: Bearer <token>` or `X-API-Key`. Developers can submit evaluations; auditors can read their tenant's audit and analytics data; only admins can change policy. Audit events are stored and queried with their authenticated tenant ID.
 
+## Observability
+
+`GET /metrics` exposes Prometheus text metrics for HTTP status codes and final risk actions. It requires the `admin` role when authentication is enabled; place it behind your internal Prometheus scraper. An alert-rule starter is available at [observability/prometheus-alerts.example.yml](observability/prometheus-alerts.example.yml). Every HTTP response also carries an `X-Request-ID` value for log correlation.
+
 ## Run with Docker
 
 With `OPENAI_API_KEY` already set in your terminal, start a containerized gateway with:

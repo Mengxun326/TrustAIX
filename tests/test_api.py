@@ -110,3 +110,10 @@ def test_authentication_enforces_roles_and_tenant_boundaries(tmp_path: Path) -> 
     finally:
         main.service = original_service
         main.auth_service = original_auth
+
+
+def test_prometheus_metrics_include_evaluations() -> None:
+    client.post("/v1/evaluate", json={"prompt": "Hello"})
+    response = client.get("/metrics")
+    assert response.status_code == 200
+    assert "trustaix_evaluations_total" in response.text

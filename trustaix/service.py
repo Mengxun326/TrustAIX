@@ -1,6 +1,7 @@
 """Evaluation orchestration."""
 
 from datetime import UTC, datetime
+from collections.abc import Callable
 from uuid import uuid4
 
 from trustaix.audit import AuditRepository
@@ -11,9 +12,15 @@ from trustaix.policies import decide, risk_score
 
 
 class EvaluationService:
-    def __init__(self, audit_repository: AuditRepository, policy: PolicyProfile | None = None) -> None:
+    def __init__(
+        self,
+        audit_repository: AuditRepository,
+        policy: PolicyProfile | None = None,
+        on_evaluation: Callable[[str], None] | None = None,
+    ) -> None:
         self.audit_repository = audit_repository
         self.policy = policy or load_policy_from_environment()
+        self.on_evaluation = on_evaluation
         self.detectors = (PromptInjectionDetector(), SensitiveDataDetector(), ContentPolicyDetector())
 
     def evaluate(
@@ -46,6 +53,8 @@ class EvaluationService:
             policy_version_id=policy_version_id,
         )
         self.audit_repository.save(event)
+        if self.on_evaluation:
+            self.on_evaluation(event.action.value)
         return EvaluationResult(
             **event.model_dump(exclude={"prompt_length", "response_length", "tenant_id", "actor_id", "policy_version_id"})
         )
