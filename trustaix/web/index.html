@@ -86,10 +86,14 @@
               <textarea id="response" name="response" rows="4" placeholder="或粘贴需要复检的模型输出…"></textarea>
               <div class="form-footer">
                 <span id="form-note">检测会写入本地审计日志</span>
-                <button id="evaluate-button" class="primary-button" type="submit">
-                  <span>开始检测</span><span class="button-arrow">↗</span>
-                </button>
+                <div class="action-buttons">
+                  <button id="chat-button" class="secondary-button" type="button">安全调用模型</button>
+                  <button id="evaluate-button" class="primary-button" type="submit">
+                    <span>开始检测</span><span class="button-arrow">↗</span>
+                  </button>
+                </div>
               </div>
+              <div class="model-call-hint"><span>模型路由</span><strong>deepseek-v4-pro</strong><small>使用已配置的 DeepSeek 网关密钥</small></div>
             </form>
           </section>
 
@@ -111,6 +115,10 @@
                 <span id="decision-badge" class="decision-badge">—</span>
                 <p id="decision-description"></p>
               </div>
+              <div id="model-output" class="model-output hidden">
+                <span class="eyebrow">已放行的模型输出</span>
+                <p id="model-output-text"></p>
+              </div>
               <div class="findings-block">
                 <span class="eyebrow">命中信号</span>
                 <ul id="findings-list"></ul>
@@ -118,9 +126,21 @@
               <div class="result-footer">
                 <span>本次评估 ID</span><code id="event-id">—</code>
               </div>
+              <div class="feedback-bar">
+                <span>这条决策准确吗？</span>
+                <button data-feedback="confirmed" type="button">确认</button>
+                <button data-feedback="false_positive" type="button">标记误报</button>
+              </div>
             </div>
           </section>
         </div>
+
+        <section class="analytics-grid" aria-label="风险统计">
+          <article class="metric-card"><span>评估总数</span><strong id="metric-total">—</strong><small>最近 1,000 条记录</small></article>
+          <article class="metric-card mint"><span>已放行</span><strong id="metric-allow">—</strong><small>allow / redact / review</small></article>
+          <article class="metric-card coral"><span>已拦截</span><strong id="metric-block">—</strong><small>高风险策略命中</small></article>
+          <article class="metric-card amber"><span>误报反馈</span><strong id="metric-fp">—</strong><small>人工标记的误报</small></article>
+        </section>
 
         <section id="audit" class="panel audit-panel">
           <div class="panel-heading">
@@ -128,7 +148,10 @@
               <span class="section-index">03</span>
               <h2>最近审计轨迹</h2>
             </div>
-            <button id="refresh-audit" class="text-button" type="button">刷新记录 ↻</button>
+            <div class="audit-tools">
+              <input id="audit-filter" type="search" placeholder="筛选动作、规则或 ID" aria-label="筛选审计记录" />
+              <button id="refresh-audit" class="text-button" type="button">刷新记录 ↻</button>
+            </div>
           </div>
           <div id="audit-list" class="audit-list">
             <p class="audit-empty">正在读取审计记录…</p>
@@ -138,6 +161,11 @@
         <section id="policy" class="policy-line" aria-label="当前策略摘要">
           <span class="eyebrow">ACTIVE POLICY</span>
           <span id="policy-line-content">读取中…</span>
+          <div class="policy-control">
+            <label for="review-score">复核阈值 <output id="review-score-value">—</output></label>
+            <input id="review-score" type="range" min="0" max="100" value="50" />
+            <button id="save-policy" type="button">保存策略</button>
+          </div>
         </section>
       </main>
     </div>

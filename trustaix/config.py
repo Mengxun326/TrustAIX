@@ -64,6 +64,11 @@ def load_policy_profile(path: str | Path) -> PolicyProfile:
     """Load and validate a YAML policy file."""
     with Path(path).open(encoding="utf-8") as stream:
         document = yaml.safe_load(stream) or {}
+    return policy_from_document(document)
+
+
+def policy_from_document(document: object) -> PolicyProfile:
+    """Validate a policy document that was loaded from disk or submitted by an API client."""
     if not isinstance(document, dict):
         raise ValueError("Policy configuration must be a YAML mapping.")
 
@@ -92,6 +97,29 @@ def load_policy_profile(path: str | Path) -> PolicyProfile:
         block_critical=_boolean(block.get("critical", True), "enforcement.block.critical"),
         block_categories=_string_set(block.get("categories", ["prompt_injection", "content_policy"])),
         block_minimum_level=minimum_level,
+    )
+
+
+def policy_document(policy: PolicyProfile) -> dict[str, object]:
+    """Serialize a validated profile into the repository's editable YAML shape."""
+    return {
+        "rules": {"enabled": sorted(policy.enabled_rules) if policy.enabled_rules is not None else None},
+        "scoring": {level.value: (policy.weights or {})[level] for level in RiskLevel},
+        "enforcement": {
+            "review_score": policy.review_score,
+            "redact_categories": sorted(policy.redact_categories),
+            "block": {
+                "critical": policy.block_critical,
+                "categories": sorted(policy.block_categories),
+                "minimum_level": policy.block_minimum_level.value,
+            },
+        },
+    }
+
+
+def save_policy_profile(path: str | Path, policy: PolicyProfile) -> None:
+    Path(path).write_text(
+        yaml.safe_dump(policy_document(policy), allow_unicode=True, sort_keys=False), encoding="utf-8"
     )
 
 

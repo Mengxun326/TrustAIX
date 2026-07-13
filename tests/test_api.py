@@ -1,5 +1,9 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
+from trustaix import main
+from trustaix.config import load_policy_profile
 from trustaix.main import app
 
 client = TestClient(app)
@@ -50,3 +54,30 @@ def test_streaming_is_rejected_before_an_upstream_call() -> None:
     )
     assert response.status_code == 400
     assert "Streaming is not supported" in response.json()["detail"]["message"]
+
+
+def test_analytics_and_feedback() -> None:
+    evaluated = client.post("/v1/evaluate", json={"prompt": "Email alice@example.com"}).json()
+    feedback = client.post(
+        f"/v1/audit-events/{evaluated['event_id']}/feedback",
+        json={"verdict": "false_positive", "note": "Synthetic test data."},
+    )
+    assert feedback.status_code == 200
+    analytics = client.get("/v1/analytics")
+    assert analytics.status_code == 200
+    assert analytics.json()["false_positives"] >= 1
+
+
+def test_review_score_can_be_saved_to_active_policy_file(tmp_path: Path, monkeypatch) -> None:
+    policy_file = tmp_path / "policy.yaml"
+    policy_file.write_text("enforcement:\n  review_score: 50\n", encoding="utf-8")
+    original_policy = main.service.policy
+    main.service.policy = load_policy_profile(policy_file)
+    monkeypatch.setenv("TRUSTAIX_POLICY_PATH", str(policy_file))
+    try:
+        response = client.put("/v1/policy/review-score?review_score=35")
+        assert response.status_code == 200
+        assert response.json()["review_score"] == 35
+        assert load_policy_profile(policy_file).review_score == 35
+    finally:
+        main.service.policy = original_policy

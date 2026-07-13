@@ -20,6 +20,11 @@ class Action(StrEnum):
     REDACT = "redact"
 
 
+class FeedbackVerdict(StrEnum):
+    CONFIRMED = "confirmed"
+    FALSE_POSITIVE = "false_positive"
+
+
 class Finding(BaseModel):
     rule_id: str
     category: Literal["prompt_injection", "pii", "secret", "content_policy"]
@@ -50,9 +55,20 @@ class EvaluationResult(BaseModel):
     evaluated_at: str
 
 
+class FeedbackRequest(BaseModel):
+    verdict: FeedbackVerdict
+    note: str = Field(default="", max_length=500)
+
+
+class AuditFeedback(FeedbackRequest):
+    event_id: str
+    updated_at: str
+
+
 class AuditEvent(EvaluationResult):
     prompt_length: int
     response_length: int
+    feedback: AuditFeedback | None = None
 
 
 class ChatMessage(BaseModel):

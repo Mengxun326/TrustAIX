@@ -41,6 +41,8 @@ Open `http://127.0.0.1:8000/docs` for interactive API documentation.
 
 Open `http://127.0.0.1:8000/` for the built-in Risk Console. It lets you run evaluations, inspect the latest audit events, and view the active policy without installing a separate frontend application.
 
+The console can also send a non-streaming request through the guarded chat proxy when `OPENAI_API_KEY` and `OPENAI_BASE_URL` are configured. When using DeepSeek, set the base URL to `https://api.deepseek.com` and use the model `deepseek-v4-pro`.
+
 To use the chat proxy with OpenAI, provide your key through the environment. TrustAIX never stores this value.
 
 ```powershell
@@ -97,7 +99,10 @@ Streaming (`stream: true`) is deliberately unsupported in v0.2, because TrustAIX
 | `POST /v1/evaluate` | Evaluate a prompt and/or model response |
 | `POST /v1/chat/completions` | Evaluate, proxy, and re-evaluate a non-streaming chat completion |
 | `GET /v1/audit-events` | Read recent audit events |
+| `POST /v1/audit-events/{event_id}/feedback` | Confirm a decision or mark it as a false positive |
+| `GET /v1/analytics` | Read aggregate actions, category hits, and false-positive count |
 | `GET /v1/policy` | Read the active non-secret policy settings |
+| `PUT /v1/policy/review-score?review_score=35` | Save the review threshold to the active YAML policy |
 
 ## Configure risk policy
 
@@ -107,7 +112,7 @@ The bundled [policy profile](config/policy.yaml) controls enabled rules, risk we
 $env:TRUSTAIX_POLICY_PATH = "config/policy.yaml"
 ```
 
-Copy this file before editing it for a specific deployment. For example, `rules.enabled` can limit enforcement to explicit rule IDs, while `enforcement.review_score` changes the aggregate score required for a review decision. Restart the service after any policy change.
+Copy this file before editing it for a specific deployment. For example, `rules.enabled` can limit enforcement to explicit rule IDs, while `enforcement.review_score` changes the aggregate score required for a review decision. With `TRUSTAIX_POLICY_PATH` set, the Risk Console can save the review threshold directly; other changes should be made in the YAML file and then the service restarted.
 
 ## Run with Docker
 
@@ -146,11 +151,12 @@ trustaix/
 - [x] Input and output PII redaction
 - [x] YAML policy profile with configurable rules and thresholds
 - [x] Docker deployment and GitHub Actions test workflow
-- [ ] Rule explanations and false-positive feedback
+- [x] Rule explanations and false-positive feedback loop
+- [x] Operational dashboard with analytics, audit trail, policy controls, and guarded DeepSeek calls
 
 ### v0.3 — Production integrations
 
-- [ ] Web dashboard for audit search and review queues
+- [x] Web dashboard for audit search and review queues
 - [ ] Optional ML classifiers and RAG citation checks
 
 ## Design principles
