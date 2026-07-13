@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#07131f" />
+    <title>TrustAIX · Risk Console</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar" aria-label="主导航">
+        <a class="brand" href="#top" aria-label="TrustAIX 控制台首页">
+          <svg class="brand-mark" viewBox="0 0 48 48" aria-hidden="true">
+            <path d="M24 4 39 10v11c0 10-6.5 18.3-15 22-8.5-3.7-15-12-15-22V10L24 4Z" />
+            <path d="m16 24 5 5 11-11" />
+          </svg>
+          <span>Trust<span>AIX</span></span>
+        </a>
+
+        <nav class="nav-list">
+          <a class="nav-item active" href="#evaluate"><span class="nav-dot"></span>实时评估</a>
+          <a class="nav-item" href="#audit"><span class="nav-dot"></span>审计轨迹</a>
+          <a class="nav-item" href="#policy"><span class="nav-dot"></span>当前策略</a>
+        </nav>
+
+        <div class="sidebar-footer">
+          <span class="eyebrow">网关状态</span>
+          <div class="health-line"><span class="pulse"></span><span id="health-label">正在连接</span></div>
+          <p id="policy-summary">读取策略中…</p>
+          <div class="session-token">
+            <label class="token-label" for="api-token">会话 API Token</label>
+            <input id="api-token" type="password" autocomplete="off" placeholder="仅保留到刷新页面" />
+            <button id="apply-token" type="button">应用 Token</button>
+          </div>
+        </div>
+      </aside>
+
+      <main id="top" class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">TRUSTAIX / GOVERNANCE DESK</p>
+            <h1>先判断是否放行，<br /><em>再让模型回答。</em></h1>
+          </div>
+          <div class="topbar-meta">
+            <span class="mono-chip">GUARD ACTIVE</span>
+            <time id="clock">--:--:--</time>
+          </div>
+        </header>
+
+        <section class="signal-strip" aria-label="网关概览">
+          <div class="signal-copy">
+            <span class="eyebrow">本次处置</span>
+            <strong id="headline-decision">等待下一次评估</strong>
+            <p id="headline-detail">提交内容，系统会检查风险、生成处置并留下可复核的记录。</p>
+          </div>
+          <div class="radar" id="radar" aria-label="风险信号环">
+            <div class="radar-ring ring-outer"></div>
+            <div class="radar-ring ring-middle"></div>
+            <div class="radar-ring ring-inner"></div>
+            <div class="radar-sweep"></div>
+            <div class="radar-core"><span id="risk-score">—</span><small>风险分</small></div>
+          </div>
+          <div class="signal-legend">
+            <div><span class="legend-mark allow"></span><span>允许 / 低风险</span></div>
+            <div><span class="legend-mark review"></span><span>复核 / 需关注</span></div>
+            <div><span class="legend-mark block"></span><span>拦截 / 高风险</span></div>
+          </div>
+        </section>
+
+        <div class="content-grid">
+          <section id="evaluate" class="panel evaluation-panel">
+            <div class="panel-heading">
+              <div>
+                <span class="section-index">01</span>
+                <h2>发起一次风险评估</h2>
+              </div>
+              <span class="endpoint">POST /v1/evaluate</span>
+            </div>
+
+            <div class="quick-tests" aria-label="示例文本">
+              <button type="button" data-example="safe">安全示例</button>
+              <button type="button" data-example="pii">隐私信息</button>
+              <button type="button" data-example="injection">提示词注入</button>
+            </div>
+
+            <form id="evaluation-form">
+              <label for="prompt">用户输入 <span>Prompt</span></label>
+              <textarea id="prompt" name="prompt" rows="6" placeholder="输入要发送给模型的内容…"></textarea>
+              <label for="response">模型输出 <span>Response，可选</span></label>
+              <textarea id="response" name="response" rows="4" placeholder="或粘贴需要复检的模型输出…"></textarea>
+              <div class="form-footer">
+                <span id="form-note">检测会写入本地审计日志</span>
+                <div class="action-buttons">
+                  <button id="chat-button" class="secondary-button" type="button">安全调用模型</button>
+                  <button id="evaluate-button" class="primary-button" type="submit">
+                    <span>开始检测</span><span class="button-arrow">↗</span>
+                  </button>
+                </div>
+              </div>
+              <div class="model-call-hint"><span>模型路由</span><strong>deepseek-v4-pro</strong><small>使用已配置的 DeepSeek 网关密钥</small></div>
+            </form>
+          </section>
+
+          <section class="panel result-panel" aria-live="polite">
+            <div class="panel-heading">
+              <div>
+                <span class="section-index">02</span>
+                <h2>处置建议</h2>
+              </div>
+              <span id="result-time" class="endpoint">尚无结果</span>
+            </div>
+            <div id="result-empty" class="empty-state">
+              <div class="empty-crosshair">+</div>
+              <p>风险雷达等待输入</p>
+              <span>运行检测后，这里会显示命中规则与处置动作。</span>
+            </div>
+            <div id="result-content" class="result-content hidden">
+              <div class="decision-row">
+                <span id="decision-badge" class="decision-badge">—</span>
+                <p id="decision-description"></p>
+              </div>
+              <div id="model-output" class="model-output hidden">
+                <span class="eyebrow">已放行的模型输出</span>
+                <p id="model-output-text"></p>
+              </div>
+              <div class="findings-block">
+                <span class="eyebrow">命中信号</span>
+                <ul id="findings-list"></ul>
+              </div>
+              <div class="result-footer">
+                <span>本次评估 ID</span><code id="event-id">—</code>
+              </div>
+              <div class="feedback-bar">
+                <span>这条决策准确吗？</span>
+                <button data-feedback="confirmed" type="button">确认</button>
+                <button data-feedback="false_positive" type="button">标记误报</button>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <section class="analytics-grid" aria-label="风险统计">
+          <article class="metric-card"><span>评估总数</span><strong id="metric-total">—</strong><small>最近 1,000 条记录</small></article>
+          <article class="metric-card mint"><span>已放行</span><strong id="metric-allow">—</strong><small>allow / redact / review</small></article>
+          <article class="metric-card coral"><span>已拦截</span><strong id="metric-block">—</strong><small>高风险策略命中</small></article>
+          <article class="metric-card amber"><span>误报反馈</span><strong id="metric-fp">—</strong><small>人工标记的误报</small></article>
+        </section>
+
+        <section id="audit" class="panel audit-panel">
+          <div class="panel-heading">
+            <div>
+              <span class="section-index">03</span>
+              <h2>最近审计轨迹</h2>
+            </div>
+            <div class="audit-tools">
+              <input id="audit-filter" type="search" placeholder="筛选动作、规则或 ID" aria-label="筛选审计记录" />
+              <button id="refresh-audit" class="text-button" type="button">刷新记录 ↻</button>
+            </div>
+          </div>
+          <div id="audit-list" class="audit-list">
+            <p class="audit-empty">正在读取审计记录…</p>
+          </div>
+        </section>
+
+        <section id="policy" class="policy-line" aria-label="当前策略摘要">
+          <span class="eyebrow">ACTIVE POLICY</span>
+          <span id="policy-line-content">读取中…</span>
+          <div class="policy-control">
+            <label for="review-score">复核阈值 <output id="review-score-value">—</output></label>
+            <input id="review-score" type="range" min="0" max="100" value="50" />
+            <button id="save-policy" type="button">保存策略</button>
+          </div>
+        </section>
+
+        <section id="governance" class="governance-panel" aria-label="策略治理工作台">
+          <div class="governance-heading">
+            <div>
+              <span class="section-index">04</span>
+              <h2>策略治理工作台</h2>
+            </div>
+            <p>先创建草稿，再提交审批；批准需要另一位管理员的 Token。回滚会基于选中版本创建新草稿。</p>
+          </div>
+          <div class="governance-grid">
+            <div class="policy-editor">
+              <label for="policy-document">策略文档 <span>JSON</span></label>
+              <textarea id="policy-document" spellcheck="false" aria-describedby="governance-status"></textarea>
+              <div class="governance-actions">
+                <button id="create-draft" class="secondary-action" type="button">创建草稿</button>
+                <button id="submit-draft" class="secondary-action" type="button">提交审批</button>
+                <button id="approve-draft" class="primary-action" type="button">批准并生效</button>
+                <button id="rollback-version" class="text-button" type="button">从选中版本回滚</button>
+              </div>
+              <p id="governance-status" class="governance-status" role="status">读取策略版本中…</p>
+            </div>
+            <div class="version-history">
+              <div class="version-history-title"><span>版本历史</span><small>点击查看或选择操作目标</small></div>
+              <div id="policy-versions" class="policy-versions"></div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

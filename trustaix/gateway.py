@@ -1,13 +1,17 @@
 """OpenAI-compatible, non-streaming chat gateway."""
 
 import os
+import json
+import time
 from copy import deepcopy
+from collections.abc import Callable
 from typing import Any, Protocol
 
 import httpx
 
 from trustaix.models import Action, ChatCompletionRequest, EvaluationRequest, EvaluationResult
-from trustaix.redaction import redact_content, text_from_content
+from trustaix.config import PolicyProfile
+from trustaix.redaction import redact_content, redact_text, text_from_content
 from trustaix.service import EvaluationService
 
 
@@ -31,25 +35,49 @@ class ChatCompletionClient(Protocol):
 
 
 class OpenAICompatibleClient:
-    """Minimal HTTP client for any Chat Completions-compatible provider."""
+    """Resilient HTTP client for OpenAI-compatible Chat Completions providers."""
+
+    def __init__(
+        self,
+        base_urls: list[str] | None = None,
+        retries: int | None = None,
+        transport: httpx.BaseTransport | None = None,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        configured_urls = os.getenv("TRUSTAIX_UPSTREAM_BASE_URLS", "")
+        fallback = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+        self.base_urls = base_urls or [url.strip() for url in configured_urls.split(",") if url.strip()] or [fallback]
+        self.retries = retries if retries is not None else int(os.getenv("TRUSTAIX_UPSTREAM_RETRIES", "2"))
+        self.transport = transport
+        self.sleep = sleep
 
     def create_chat_completion(self, payload: dict[str, Any]) -> dict[str, Any]:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise UpstreamConfigurationError("OPENAI_API_KEY is not configured.")
 
-        base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-        try:
-            with httpx.Client(timeout=60.0) as client:
-                response = client.post(
-                    f"{base_url}/chat/completions",
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    json=payload,
-                )
-                response.raise_for_status()
-                return response.json()
-        except httpx.HTTPError as error:
-            raise UpstreamRequestError("The upstream chat provider request failed.") from error
+        last_error: Exception | None = None
+        for base_url in self.base_urls:
+            for attempt in range(self.retries + 1):
+                try:
+                    with httpx.Client(timeout=60.0, transport=self.transport) as client:
+                        response = client.post(
+                            f"{base_url.rstrip('/')}/chat/completions",
+                            headers={"Authorization": f"Bearer {api_key}"},
+                            json=payload,
+                        )
+                    if response.status_code < 400:
+                        return response.json()
+                    if response.status_code not in {408, 429} and response.status_code < 500:
+                        response.raise_for_status()
+                    last_error = httpx.HTTPStatusError(
+                        "Retryable upstream response.", request=response.request, response=response
+                    )
+                except httpx.HTTPError as error:
+                    last_error = error
+                if attempt < self.retries:
+                    self.sleep(0.2 * (2**attempt))
+        raise UpstreamRequestError("All configured upstream chat providers failed.") from last_error
 
 
 class ChatGatewayService:
@@ -57,13 +85,24 @@ class ChatGatewayService:
         self.evaluation_service = evaluation_service
         self.client = client
 
-    def complete(self, request: ChatCompletionRequest) -> dict[str, Any]:
+    def complete(
+        self,
+        request: ChatCompletionRequest,
+        tenant_id: str = "default",
+        actor_id: str | None = None,
+        policy: PolicyProfile | None = None,
+        policy_version_id: str | None = None,
+    ) -> dict[str, Any]:
         if request.stream:
             raise ValueError("Streaming is not supported because output must be evaluated before release.")
 
         prompt = "\n".join(text_from_content(message.content) for message in request.messages)
         input_evaluation = self.evaluation_service.evaluate(
-            EvaluationRequest(request_id=request.trustaix_request_id, prompt=prompt)
+            EvaluationRequest(request_id=request.trustaix_request_id, prompt=prompt),
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            policy=policy,
+            policy_version_id=policy_version_id,
         )
         if input_evaluation.action is Action.BLOCK:
             raise GatewayBlockedError(input_evaluation)
@@ -76,7 +115,16 @@ class ChatGatewayService:
         upstream_response = self.client.create_chat_completion(upstream_request.upstream_payload())
         response_text = _response_text(upstream_response)
         output_evaluation = self.evaluation_service.evaluate(
-            EvaluationRequest(request_id=request.trustaix_request_id, response=response_text)
+            EvaluationRequest(
+                request_id=request.trustaix_request_id,
+                response=response_text,
+                require_citations=request.trustaix_require_citations,
+                allowed_sources=request.trustaix_allowed_sources,
+            ),
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            policy=policy,
+            policy_version_id=policy_version_id,
         )
 
         safe_response = deepcopy(upstream_response)
@@ -104,6 +152,8 @@ def _response_text(response: dict[str, Any]) -> str:
         message = choice.get("message") if isinstance(choice, dict) else None
         content = message.get("content") if isinstance(message, dict) else None
         texts.append(text_from_content(content))
+        if isinstance(message, dict) and message.get("tool_calls"):
+            texts.append(json.dumps(message["tool_calls"], ensure_ascii=False))
     return "\n".join(texts)
 
 
@@ -112,6 +162,8 @@ def _replace_response_content(response: dict[str, Any], replacement: str) -> Non
         message = choice.get("message") if isinstance(choice, dict) else None
         if isinstance(message, dict):
             message["content"] = replacement
+            message.pop("tool_calls", None)
+            message.pop("function_call", None)
 
 
 def _redact_response_content(response: dict[str, Any]) -> None:
@@ -119,3 +171,7 @@ def _redact_response_content(response: dict[str, Any]) -> None:
         message = choice.get("message") if isinstance(choice, dict) else None
         if isinstance(message, dict):
             message["content"] = redact_content(message.get("content"))
+            for tool_call in message.get("tool_calls", []):
+                function = tool_call.get("function") if isinstance(tool_call, dict) else None
+                if isinstance(function, dict) and isinstance(function.get("arguments"), str):
+                    function["arguments"] = redact_text(function["arguments"])

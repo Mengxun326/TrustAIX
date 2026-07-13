@@ -20,9 +20,14 @@ class Action(StrEnum):
     REDACT = "redact"
 
 
+class FeedbackVerdict(StrEnum):
+    CONFIRMED = "confirmed"
+    FALSE_POSITIVE = "false_positive"
+
+
 class Finding(BaseModel):
     rule_id: str
-    category: Literal["prompt_injection", "pii", "secret", "content_policy"]
+    category: Literal["prompt_injection", "pii", "secret", "content_policy", "citation"]
     level: RiskLevel
     message: str
     evidence: str
@@ -33,6 +38,8 @@ class EvaluationRequest(BaseModel):
     request_id: str | None = Field(default=None, max_length=128)
     prompt: str = Field(default="", max_length=100_000)
     response: str = Field(default="", max_length=100_000)
+    require_citations: bool = False
+    allowed_sources: list[str] = Field(default_factory=list, max_length=100)
 
     @model_validator(mode="after")
     def contains_content(self) -> "EvaluationRequest":
@@ -50,9 +57,28 @@ class EvaluationResult(BaseModel):
     evaluated_at: str
 
 
+class FeedbackRequest(BaseModel):
+    verdict: FeedbackVerdict
+    note: str = Field(default="", max_length=500)
+
+
+class PolicyVersionDraftRequest(BaseModel):
+    document: dict[str, Any]
+    note: str = Field(default="", max_length=500)
+
+
+class AuditFeedback(FeedbackRequest):
+    event_id: str
+    updated_at: str
+
+
 class AuditEvent(EvaluationResult):
     prompt_length: int
     response_length: int
+    tenant_id: str = "default"
+    actor_id: str | None = None
+    policy_version_id: str | None = None
+    feedback: AuditFeedback | None = None
 
 
 class ChatMessage(BaseModel):
@@ -73,7 +99,13 @@ class ChatCompletionRequest(BaseModel):
     messages: list[ChatMessage] = Field(min_length=1)
     stream: bool = False
     trustaix_request_id: str | None = Field(default=None, max_length=128)
+    trustaix_require_citations: bool = False
+    trustaix_allowed_sources: list[str] = Field(default_factory=list, max_length=100)
 
     def upstream_payload(self) -> dict[str, Any]:
         """Keep TrustAIX metadata local rather than forwarding it upstream."""
-        return self.model_dump(mode="json", exclude={"trustaix_request_id"}, exclude_none=True)
+        return self.model_dump(
+            mode="json",
+            exclude={"trustaix_request_id", "trustaix_require_citations", "trustaix_allowed_sources"},
+            exclude_none=True,
+        )
