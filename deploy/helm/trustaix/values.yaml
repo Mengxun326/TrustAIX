@@ -1,0 +1,14 @@
+image:
+  repository: trustaix
+  tag: latest
+replicaCount: 2
+service:
+  port: 8000
+ingress:
+  enabled: false
+  className: nginx
+  host: trustaix.example.com
+secrets:
+  existingSecret: trustaix-secrets
+  openaiApiKeyKey: openai-api-key
+  accessConfigKey: access.yaml

@@ -89,7 +89,7 @@ Invoke-RestMethod -Method Post `
 
 If the request includes PII, TrustAIX replaces it before forwarding. The response is checked again and its `trustaix` field contains the input and output decisions. Requests containing high-confidence prompt injection or restricted content are blocked and never sent upstream.
 
-Streaming (`stream: true`) is deliberately unsupported in v0.2, because TrustAIX must inspect the full response before releasing it.
+Streaming (`stream: true`) uses buffered-safe mode: TrustAIX obtains and inspects the full upstream result first, then releases OpenAI-compatible SSE chunks only after the decision is known. This avoids partial-response leakage; it is a safety feature rather than low-latency token passthrough.
 
 ## API
 
@@ -130,6 +130,8 @@ $env:TRUSTAIX_ADMIN_TOKEN = "replace-with-a-long-random-token"
 
 Clients pass a token in `Authorization: Bearer <token>` or `X-API-Key`. Developers can submit evaluations; auditors can read their tenant's audit and analytics data; only admins can change policy. Audit events are stored and queried with their authenticated tenant ID.
 
+API keys are retained as SHA-256 digests in process memory. For rotation, replace `token_env` with a `token_envs` list in the private access file, deploy both values, then remove the old variable after clients have migrated. TrustAIX also supports OAuth 2.0/OIDC token introspection; see [config/access.oidc.example.env](config/access.oidc.example.env).
+
 ## Observability
 
 `GET /metrics` exposes Prometheus text metrics for HTTP status codes and final risk actions. It requires the `admin` role when authentication is enabled; place it behind your internal Prometheus scraper. An alert-rule starter is available at [observability/prometheus-alerts.example.yml](observability/prometheus-alerts.example.yml). Every HTTP response also carries an `X-Request-ID` value for log correlation.
@@ -145,6 +147,8 @@ docker compose up --build
 The service is available at `http://127.0.0.1:8010`; its SQLite audit database is kept in a named Docker volume. The Compose file defaults to DeepSeek's OpenAI-compatible endpoint. Set `OPENAI_BASE_URL` before startup to use another compatible provider.
 
 The image runs as an unprivileged `trustaix` user, includes a health check, and Compose enables a read-only application filesystem. Mount only the `/data` volume for audit persistence.
+
+For a production HTTPS endpoint use `compose.production.yaml`, which puts Caddy in front of the gateway. Kubernetes users can start from [the Helm chart](deploy/helm/trustaix). The initial PostgreSQL schema is available at [migrations/postgresql/0001_initial.sql](migrations/postgresql/0001_initial.sql); run it through your approved migration system before moving audit retention to a managed database. SQLite backups can be made consistently with `python -m trustaix.backup SOURCE DESTINATION`.
 
 ## Versioned policy workflow
 

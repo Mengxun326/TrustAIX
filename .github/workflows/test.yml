@@ -23,3 +23,21 @@ jobs:
       - run: python -m pytest -q
       - if: matrix.python-version == '3.13'
         run: docker build --tag trustaix:ci .
+      - if: matrix.python-version == '3.13'
+        run: |
+          docker run -d --rm --name trustaix-ci -p 8000:8000 trustaix:ci
+          for i in {1..15}; do curl --fail http://127.0.0.1:8000/health && exit 0; sleep 1; done
+          docker logs trustaix-ci
+          exit 1
+  browser-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: pip install -e .
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e

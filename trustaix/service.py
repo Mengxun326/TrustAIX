@@ -6,9 +6,19 @@ from uuid import uuid4
 
 from trustaix.audit import AuditRepository
 from trustaix.config import PolicyProfile, load_policy_from_environment
-from trustaix.detectors import CitationDetector, ContentPolicyDetector, PromptInjectionDetector, SensitiveDataDetector
+from trustaix.detectors import (
+    CitationDetector,
+    ClassifierDetector,
+    ContentPolicyDetector,
+    PromptInjectionDetector,
+    RulePackDetector,
+    SensitiveDataDetector,
+    load_classifier,
+    load_rule_packs,
+)
 from trustaix.models import AuditEvent, EvaluationRequest, EvaluationResult
 from trustaix.policies import decide, risk_score
+from trustaix.source_verifier import SourceVerifier
 
 
 class EvaluationService:
@@ -21,8 +31,16 @@ class EvaluationService:
         self.audit_repository = audit_repository
         self.policy = policy or load_policy_from_environment()
         self.on_evaluation = on_evaluation
-        self.detectors = (PromptInjectionDetector(), SensitiveDataDetector(), ContentPolicyDetector())
+        plugin_detectors = []
+        rule_pack = load_rule_packs()
+        if rule_pack:
+            plugin_detectors.append(RulePackDetector(rule_pack))
+        classifier = load_classifier()
+        if classifier:
+            plugin_detectors.append(ClassifierDetector(classifier))
+        self.detectors = (PromptInjectionDetector(), SensitiveDataDetector(), ContentPolicyDetector(), *plugin_detectors)
         self.citation_detector = CitationDetector()
+        self.source_verifier = SourceVerifier()
 
     def evaluate(
         self,
@@ -40,6 +58,7 @@ class EvaluationService:
                     findings.extend(detector.detect(text, location))
         if request.require_citations and request.response.strip():
             findings.extend(self.citation_detector.detect(request.response, "response", request.allowed_sources))
+            findings.extend(self.source_verifier.verify(request.response, request.allowed_sources))
         findings = [finding for finding in findings if policy.allows(finding)]
 
         event = AuditEvent(

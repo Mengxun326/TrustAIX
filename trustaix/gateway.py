@@ -5,6 +5,7 @@ import json
 import time
 from copy import deepcopy
 from collections.abc import Callable
+from collections.abc import Iterator
 from typing import Any, Protocol
 
 import httpx
@@ -93,9 +94,6 @@ class ChatGatewayService:
         policy: PolicyProfile | None = None,
         policy_version_id: str | None = None,
     ) -> dict[str, Any]:
-        if request.stream:
-            raise ValueError("Streaming is not supported because output must be evaluated before release.")
-
         prompt = "\n".join(text_from_content(message.content) for message in request.messages)
         input_evaluation = self.evaluation_service.evaluate(
             EvaluationRequest(request_id=request.trustaix_request_id, prompt=prompt),
@@ -108,6 +106,8 @@ class ChatGatewayService:
             raise GatewayBlockedError(input_evaluation)
 
         upstream_request = request.model_copy(deep=True)
+        # Upstream output is fully buffered and inspected before any client chunk is released.
+        upstream_request.stream = False
         if input_evaluation.action is Action.REDACT:
             for message in upstream_request.messages:
                 message.content = redact_content(message.content)
@@ -140,6 +140,41 @@ class ChatGatewayService:
             "output": output_evaluation.model_dump(mode="json"),
         }
         return safe_response
+
+    def complete_buffered_stream(
+        self,
+        request: ChatCompletionRequest,
+        tenant_id: str = "default",
+        actor_id: str | None = None,
+        policy: PolicyProfile | None = None,
+        policy_version_id: str | None = None,
+        chunk_size: int = 160,
+    ) -> Iterator[str]:
+        """Emit OpenAI-compatible SSE only after the complete output passes inspection."""
+        safe_response = self.complete(
+            request.model_copy(update={"stream": False}),
+            tenant_id=tenant_id,
+            actor_id=actor_id,
+            policy=policy,
+            policy_version_id=policy_version_id,
+        )
+        text = _response_text(safe_response)
+        response_id = safe_response.get("id", "trustaix-buffered")
+        for index in range(0, len(text), chunk_size):
+            payload = {
+                "id": response_id,
+                "object": "chat.completion.chunk",
+                "choices": [{"index": 0, "delta": {"content": text[index:index + chunk_size]}, "finish_reason": None}],
+            }
+            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+        final = {
+            "id": response_id,
+            "object": "chat.completion.chunk",
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            "trustaix": safe_response["trustaix"],
+        }
+        yield f"data: {json.dumps(final, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
 
 
 def _response_text(response: dict[str, Any]) -> str:

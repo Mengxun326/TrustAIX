@@ -5,12 +5,13 @@ import logging
 import csv
 import io
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from trustaix.audit import AuditRepository
@@ -40,7 +41,7 @@ app = FastAPI(title="TrustAIX", version="0.1.0", description="LLM risk-control g
 logger = logging.getLogger("trustaix")
 web_directory = Path(__file__).parent / "web"
 app.mount("/static", StaticFiles(directory=web_directory), name="static")
-database_path = os.getenv("TRUSTAIX_AUDIT_DB", "trustaix.db")
+database_path = os.getenv("TRUSTAIX_DATABASE_URL") or os.getenv("TRUSTAIX_AUDIT_DB", "trustaix.db")
 service = EvaluationService(AuditRepository(database_path))
 chat_gateway = ChatGatewayService(service, OpenAICompatibleClient())
 auth_service = AuthService.from_environment()
@@ -103,21 +104,24 @@ def evaluate(
     )
 
 
-@app.post("/v1/chat/completions")
+@app.post("/v1/chat/completions", response_model=None)
 def chat_completions(
     request: ChatCompletionRequest,
     principal: Principal = Depends(require_roles(Role.DEVELOPER, Role.ADMIN)),
-) -> dict:
-    """Evaluate, forward, and re-evaluate a non-streaming chat completion."""
+) -> dict | StreamingResponse:
+    """Evaluate, forward, inspect, then return a normal or safely buffered SSE response."""
     try:
         policy, version = active_policy(principal)
-        return chat_gateway.complete(
-            request,
-            tenant_id=principal.tenant_id,
-            actor_id=principal.key_id,
-            policy=policy,
-            policy_version_id=version.id,
-        )
+        if request.stream:
+            return StreamingResponse(
+                chat_gateway.complete_buffered_stream(
+                    request, tenant_id=principal.tenant_id, actor_id=principal.key_id,
+                    policy=policy, policy_version_id=version.id,
+                ),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-TrustAIX-Streaming": "buffered-safe"},
+            )
+        return chat_gateway.complete(request, tenant_id=principal.tenant_id, actor_id=principal.key_id, policy=policy, policy_version_id=version.id)
     except GatewayBlockedError as error:
         raise HTTPException(
             status_code=400,
@@ -210,6 +214,16 @@ def add_audit_feedback(
     if saved is None:
         raise HTTPException(status_code=404, detail={"message": "Audit event was not found."})
     return saved
+
+
+@app.delete("/v1/audit-events/retention")
+def apply_retention_policy(
+    before: datetime = Query(description="Delete events before this ISO-8601 timestamp."),
+    principal: Principal = Depends(require_roles(Role.ADMIN)),
+) -> dict[str, int]:
+    if before.tzinfo is None:
+        before = before.replace(tzinfo=UTC)
+    return {"deleted": service.audit_repository.purge_before(before, tenant_id=principal.tenant_id)}
 
 
 @app.get("/v1/policy")

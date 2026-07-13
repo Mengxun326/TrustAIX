@@ -9,3 +9,6 @@ build/
 trustaix.db
 .env
 config/access.local.yaml
+node_modules/
+test-results/
+playwright-report/

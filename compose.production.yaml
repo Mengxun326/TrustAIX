@@ -1,0 +1,29 @@
+services:
+  trustaix:
+    build: .
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com}
+      TRUSTAIX_AUDIT_DB: /data/trustaix.db
+      TRUSTAIX_AUTH_ENABLED: "true"
+      TRUSTAIX_AUTH_CONFIG: /run/secrets/access.yaml
+    volumes:
+      - trustaix_data:/data
+      - ./config/access.local.yaml:/run/secrets/access.yaml:ro
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+  caddy:
+    image: caddy:2.8-alpine
+    ports: ["80:80", "443:443"]
+    environment:
+      TRUSTAIX_DOMAIN: ${TRUSTAIX_DOMAIN:?Set a public DNS name}
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [trustaix]
+volumes:
+  trustaix_data:
+  caddy_data:
+  caddy_config:
