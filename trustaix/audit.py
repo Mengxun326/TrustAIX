@@ -2,9 +2,10 @@
 
 import json
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 
-from trustaix.models import AuditEvent
+from trustaix.models import AuditEvent, AuditFeedback, FeedbackRequest
 
 
 class AuditRepository:
@@ -26,6 +27,16 @@ class AuditRepository:
                 )
                 """
             )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS audit_feedback (
+                    event_id TEXT PRIMARY KEY,
+                    verdict TEXT NOT NULL,
+                    note TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
 
     def save(self, event: AuditEvent) -> None:
         with self._connect() as connection:
@@ -39,4 +50,61 @@ class AuditRepository:
             rows = connection.execute(
                 "SELECT payload FROM audit_events ORDER BY evaluated_at DESC LIMIT ?", (limit,)
             ).fetchall()
-        return [AuditEvent.model_validate(json.loads(row[0])) for row in rows]
+        events = [AuditEvent.model_validate(json.loads(row[0])) for row in rows]
+        feedback = self._feedback_for([event.event_id for event in events])
+        return [event.model_copy(update={"feedback": feedback.get(event.event_id)}) for event in events]
+
+    def add_feedback(self, event_id: str, feedback: FeedbackRequest) -> AuditFeedback | None:
+        with self._connect() as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM audit_events WHERE event_id = ?", (event_id,)
+            ).fetchone()
+            if not exists:
+                return None
+            updated_at = datetime.now(UTC).isoformat()
+            connection.execute(
+                """
+                INSERT INTO audit_feedback(event_id, verdict, note, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(event_id) DO UPDATE SET
+                  verdict = excluded.verdict,
+                  note = excluded.note,
+                  updated_at = excluded.updated_at
+                """,
+                (event_id, feedback.verdict.value, feedback.note, updated_at),
+            )
+        return AuditFeedback(event_id=event_id, updated_at=updated_at, **feedback.model_dump())
+
+    def analytics(self, limit: int = 1_000) -> dict[str, object]:
+        events = self.latest(limit)
+        actions = {action: 0 for action in ("allow", "review", "redact", "block")}
+        categories: dict[str, int] = {}
+        false_positives = 0
+        for event in events:
+            actions[event.action.value] += 1
+            for finding in event.findings:
+                categories[finding.category] = categories.get(finding.category, 0) + 1
+            if event.feedback and event.feedback.verdict.value == "false_positive":
+                false_positives += 1
+        return {
+            "evaluations": len(events),
+            "actions": actions,
+            "categories": categories,
+            "false_positives": false_positives,
+        }
+
+    def _feedback_for(self, event_ids: list[str]) -> dict[str, AuditFeedback]:
+        if not event_ids:
+            return {}
+        placeholders = ",".join("?" for _ in event_ids)
+        with self._connect() as connection:
+            rows = connection.execute(
+                f"SELECT event_id, verdict, note, updated_at FROM audit_feedback WHERE event_id IN ({placeholders})",
+                event_ids,
+            ).fetchall()
+        return {
+            event_id: AuditFeedback(
+                event_id=event_id, verdict=verdict, note=note, updated_at=updated_at
+            )
+            for event_id, verdict, note, updated_at in rows
+        }
