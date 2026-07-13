@@ -134,3 +134,13 @@ def test_audit_export_returns_csv_and_json() -> None:
     json_export = client.get("/v1/audit-events/export?format=json")
     assert json_export.status_code == 200
     assert isinstance(json_export.json(), list)
+
+
+def test_citation_requirement_marks_uncited_response_for_review() -> None:
+    response = client.post(
+        "/v1/evaluate",
+        json={"response": "The regulation changed last year.", "require_citations": True},
+    )
+    assert response.status_code == 200
+    assert response.json()["action"] == "review"
+    assert response.json()["findings"][0]["rule_id"] == "CIT-001"

@@ -115,7 +115,12 @@ class ChatGatewayService:
         upstream_response = self.client.create_chat_completion(upstream_request.upstream_payload())
         response_text = _response_text(upstream_response)
         output_evaluation = self.evaluation_service.evaluate(
-            EvaluationRequest(request_id=request.trustaix_request_id, response=response_text),
+            EvaluationRequest(
+                request_id=request.trustaix_request_id,
+                response=response_text,
+                require_citations=request.trustaix_require_citations,
+                allowed_sources=request.trustaix_allowed_sources,
+            ),
             tenant_id=tenant_id,
             actor_id=actor_id,
             policy=policy,

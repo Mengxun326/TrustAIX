@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from trustaix.audit import AuditRepository
 from trustaix.config import PolicyProfile, load_policy_from_environment
-from trustaix.detectors import ContentPolicyDetector, PromptInjectionDetector, SensitiveDataDetector
+from trustaix.detectors import CitationDetector, ContentPolicyDetector, PromptInjectionDetector, SensitiveDataDetector
 from trustaix.models import AuditEvent, EvaluationRequest, EvaluationResult
 from trustaix.policies import decide, risk_score
 
@@ -22,6 +22,7 @@ class EvaluationService:
         self.policy = policy or load_policy_from_environment()
         self.on_evaluation = on_evaluation
         self.detectors = (PromptInjectionDetector(), SensitiveDataDetector(), ContentPolicyDetector())
+        self.citation_detector = CitationDetector()
 
     def evaluate(
         self,
@@ -37,6 +38,8 @@ class EvaluationService:
             if text.strip():
                 for detector in self.detectors:
                     findings.extend(detector.detect(text, location))
+        if request.require_citations and request.response.strip():
+            findings.extend(self.citation_detector.detect(request.response, "response", request.allowed_sources))
         findings = [finding for finding in findings if policy.allows(finding)]
 
         event = AuditEvent(
