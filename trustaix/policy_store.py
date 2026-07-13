@@ -34,6 +34,7 @@ class PolicyVersion:
             "parent_id": self.parent_id,
             "approved_by": self.approved_by,
             "approved_at": self.approved_at,
+            "document": self.document,
             "policy": policy_from_document(self.document).public_dict(),
         }
 

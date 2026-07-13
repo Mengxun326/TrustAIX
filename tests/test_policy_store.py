@@ -17,6 +17,7 @@ def test_policy_requires_independent_approval_and_supports_rollback(tmp_path) ->
     approved = repository.approve(draft.id, "tenant-a", "approver")
     assert approved.status == "active"
     assert repository.active("tenant-a").id == draft.id
+    assert approved.public_dict()["document"] == policy_document(DEFAULT_POLICY)
     rollback = repository.rollback_draft(active.id, "tenant-a", "operator")
     assert rollback.status == "draft"
     assert rollback.parent_id == active.id

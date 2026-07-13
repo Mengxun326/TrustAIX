@@ -28,6 +28,11 @@
           <span class="eyebrow">网关状态</span>
           <div class="health-line"><span class="pulse"></span><span id="health-label">正在连接</span></div>
           <p id="policy-summary">读取策略中…</p>
+          <div class="session-token">
+            <label class="token-label" for="api-token">会话 API Token</label>
+            <input id="api-token" type="password" autocomplete="off" placeholder="仅保留到刷新页面" />
+            <button id="apply-token" type="button">应用 Token</button>
+          </div>
         </div>
       </aside>
 
@@ -165,6 +170,33 @@
             <label for="review-score">复核阈值 <output id="review-score-value">—</output></label>
             <input id="review-score" type="range" min="0" max="100" value="50" />
             <button id="save-policy" type="button">保存策略</button>
+          </div>
+        </section>
+
+        <section id="governance" class="governance-panel" aria-label="策略治理工作台">
+          <div class="governance-heading">
+            <div>
+              <span class="section-index">04</span>
+              <h2>策略治理工作台</h2>
+            </div>
+            <p>先创建草稿，再提交审批；批准需要另一位管理员的 Token。回滚会基于选中版本创建新草稿。</p>
+          </div>
+          <div class="governance-grid">
+            <div class="policy-editor">
+              <label for="policy-document">策略文档 <span>JSON</span></label>
+              <textarea id="policy-document" spellcheck="false" aria-describedby="governance-status"></textarea>
+              <div class="governance-actions">
+                <button id="create-draft" class="secondary-action" type="button">创建草稿</button>
+                <button id="submit-draft" class="secondary-action" type="button">提交审批</button>
+                <button id="approve-draft" class="primary-action" type="button">批准并生效</button>
+                <button id="rollback-version" class="text-button" type="button">从选中版本回滚</button>
+              </div>
+              <p id="governance-status" class="governance-status" role="status">读取策略版本中…</p>
+            </div>
+            <div class="version-history">
+              <div class="version-history-title"><span>版本历史</span><small>点击查看或选择操作目标</small></div>
+              <div id="policy-versions" class="policy-versions"></div>
+            </div>
           </div>
         </section>
       </main>

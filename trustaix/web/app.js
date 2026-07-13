@@ -1,6 +1,17 @@
 const $ = (selector) => document.querySelector(selector);
 
-const state = { policy: null, lastResult: null, auditEvents: [] };
+const state = { policy: null, lastResult: null, auditEvents: [], token: "", selectedVersion: null, draftVersion: null, clockStarted: false };
+
+function apiFetch(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (state.token) headers.set("Authorization", `Bearer ${state.token}`);
+  return fetch(url, { ...options, headers });
+}
+
+async function responseDetail(response, fallback) {
+  const body = await response.json().catch(() => ({}));
+  return body.detail?.message || body.detail || body.message || fallback;
+}
 const copy = {
   allow: "未发现需要拦截或脱敏的风险信号，可以继续处理。",
   review: "存在需要人工确认的风险信号。建议复核上下文后再放行。",
@@ -97,7 +108,7 @@ function renderAudit(events) {
 }
 
 async function refreshAudit() {
-  const response = await fetch("/v1/audit-events?limit=20");
+  const response = await apiFetch("/v1/audit-events?limit=20");
   if (!response.ok) throw new Error("无法读取审计记录");
   state.auditEvents = await response.json();
   applyAuditFilter();
@@ -113,7 +124,7 @@ function applyAuditFilter() {
 }
 
 async function loadAnalytics() {
-  const response = await fetch("/v1/analytics");
+  const response = await apiFetch("/v1/analytics");
   if (!response.ok) throw new Error("无法读取风险统计");
   const data = await response.json();
   $("#metric-total").textContent = data.evaluations;
@@ -123,7 +134,7 @@ async function loadAnalytics() {
 }
 
 async function loadPolicy() {
-  const response = await fetch("/v1/policy");
+  const response = await apiFetch("/v1/policy");
   if (!response.ok) throw new Error("无法读取策略");
   state.policy = await response.json();
   const rules = state.policy.enabled_rules === "all" ? "全部规则" : `${state.policy.enabled_rules.length} 条规则`;
@@ -132,12 +143,74 @@ async function loadPolicy() {
   $("#policy-line-content").textContent = `已启用 ${rules}；复核阈值 ${state.policy.review_score}；${state.policy.redact_categories.join(" / ")} 将被脱敏。`;
   $("#review-score").value = state.policy.review_score;
   $("#review-score-value").textContent = state.policy.review_score;
+  const documentValue = state.policy.version?.document;
+  if (documentValue && !state.selectedVersion) {
+    $("#policy-document").value = JSON.stringify(documentValue, null, 2);
+  }
+  await loadPolicyVersions();
+}
+
+function renderPolicyVersions(versions) {
+  const list = $("#policy-versions");
+  list.replaceChildren();
+  if (!versions.length) {
+    list.textContent = "暂无策略版本。";
+    return;
+  }
+  versions.forEach((version) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `version-row ${version.status}${state.selectedVersion?.id === version.id ? " selected" : ""}`;
+    const marker = document.createElement("span"); marker.className = "version-marker";
+    const copy = document.createElement("span"); copy.className = "version-copy";
+    const label = document.createElement("strong"); label.textContent = version.id.slice(0, 8);
+    const detail = document.createElement("small"); detail.textContent = `${version.note || "未注明变更"} · ${version.created_by}`;
+    copy.append(label, detail);
+    const status = document.createElement("span"); status.className = "version-status"; status.textContent = version.status;
+    row.append(marker, copy, status);
+    row.addEventListener("click", () => {
+      state.selectedVersion = version;
+      if (version.status === "draft") state.draftVersion = version;
+      $("#policy-document").value = JSON.stringify(version.document, null, 2);
+      $("#governance-status").textContent = `已选中版本 ${version.id.slice(0, 8)}（${version.status}）。`;
+      renderPolicyVersions(versions);
+    });
+    list.append(row);
+  });
+}
+
+async function loadPolicyVersions() {
+  const response = await apiFetch("/v1/policy-versions");
+  if (!response.ok) throw new Error(await responseDetail(response, "无法读取策略版本"));
+  const versions = await response.json();
+  if (state.selectedVersion) {
+    state.selectedVersion = versions.find((version) => version.id === state.selectedVersion.id) || null;
+  }
+  if (state.draftVersion) {
+    state.draftVersion = versions.find((version) => version.id === state.draftVersion.id) || null;
+  }
+  renderPolicyVersions(versions);
+}
+
+function selectedVersionId() {
+  return state.selectedVersion?.id || state.draftVersion?.id;
+}
+
+async function refreshGovernance(message) {
+  state.selectedVersion = null;
+  state.draftVersion = null;
+  await Promise.all([loadPolicy(), loadAnalytics()]);
+  $("#governance-status").textContent = message;
 }
 
 async function boot() {
-  updateClock(); window.setInterval(updateClock, 1000);
+  updateClock();
+  if (!state.clockStarted) {
+    window.setInterval(updateClock, 1000);
+    state.clockStarted = true;
+  }
   try {
-    const response = await fetch("/health");
+    const response = await apiFetch("/health");
     setHealth(response.ok);
     await Promise.all([refreshAudit(), loadPolicy(), loadAnalytics()]);
   } catch (error) {
@@ -160,7 +233,7 @@ $("#evaluation-form").addEventListener("submit", async (event) => {
   button.disabled = true; button.querySelector("span").textContent = "检测中…";
   $("#form-note").textContent = "正在穿过风险雷达…";
   try {
-    const response = await fetch("/v1/evaluate", {
+    const response = await apiFetch("/v1/evaluate", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ prompt, response: responseText }),
     });
     if (!response.ok) throw new Error("请求被网关拒绝");
@@ -182,7 +255,7 @@ $("#chat-button").addEventListener("click", async () => {
   button.disabled = true; button.textContent = "模型处理中…";
   $("#form-note").textContent = "正在检测输入、调用模型并复检输出…";
   try {
-    const response = await fetch("/v1/chat/completions", {
+    const response = await apiFetch("/v1/chat/completions", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: "deepseek-v4-pro", messages: [{ role: "user", content: prompt }], stream: false }),
     });
@@ -210,7 +283,7 @@ document.querySelectorAll("[data-feedback]").forEach((button) => {
     if (!state.lastResult?.event_id) return;
     button.disabled = true;
     try {
-      const response = await fetch(`/v1/audit-events/${state.lastResult.event_id}/feedback`, {
+      const response = await apiFetch(`/v1/audit-events/${state.lastResult.event_id}/feedback`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ verdict: button.dataset.feedback }),
       });
@@ -225,13 +298,81 @@ $("#review-score").addEventListener("input", (event) => { $("#review-score-value
 $("#save-policy").addEventListener("click", async () => {
   const score = $("#review-score").value;
   try {
-    const response = await fetch(`/v1/policy/review-score?review_score=${score}`, { method: "PUT" });
+    const response = await apiFetch(`/v1/policy/review-score?review_score=${score}`, { method: "PUT" });
     const body = await response.json();
     if (!response.ok) throw new Error(body.detail?.message || "策略保存失败");
     state.policy = body;
     $("#form-note").textContent = `已保存复核阈值 ${body.review_score}。`;
     await loadPolicy();
   } catch (error) { $("#form-note").textContent = error.message; }
+});
+
+$("#apply-token").addEventListener("click", () => {
+  state.token = $("#api-token").value.trim();
+  $("#api-token").value = "";
+  $("#governance-status").textContent = state.token
+    ? "会话 Token 已应用；它不会写入浏览器存储，刷新页面后自动清除。"
+    : "已清除会话 Token。";
+  boot();
+});
+
+$("#create-draft").addEventListener("click", async () => {
+  try {
+    const documentValue = JSON.parse($("#policy-document").value);
+    const response = await apiFetch("/v1/policy-versions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ document: documentValue, note: "Created from Governance Desk" }),
+    });
+    if (!response.ok) throw new Error(await responseDetail(response, "创建草稿失败"));
+    const version = await response.json();
+    state.draftVersion = version;
+    state.selectedVersion = version;
+    await loadPolicyVersions();
+    $("#governance-status").textContent = `草稿 ${version.id.slice(0, 8)} 已创建。请检查后提交审批。`;
+  } catch (error) {
+    $("#governance-status").textContent = error instanceof SyntaxError ? "策略文档不是有效 JSON。" : error.message;
+  }
+});
+
+$("#submit-draft").addEventListener("click", async () => {
+  const versionId = selectedVersionId();
+  if (!versionId) { $("#governance-status").textContent = "请先创建或选中一个草稿。"; return; }
+  try {
+    const response = await apiFetch(`/v1/policy-versions/${versionId}/submit`, { method: "POST" });
+    if (!response.ok) throw new Error(await responseDetail(response, "提交审批失败"));
+    const version = await response.json();
+    state.selectedVersion = version;
+    state.draftVersion = null;
+    await loadPolicyVersions();
+    $("#governance-status").textContent = `版本 ${version.id.slice(0, 8)} 已提交，等待另一位管理员批准。`;
+  } catch (error) { $("#governance-status").textContent = error.message; }
+});
+
+$("#approve-draft").addEventListener("click", async () => {
+  const versionId = selectedVersionId();
+  if (!versionId) { $("#governance-status").textContent = "请先选中一个待审批版本。"; return; }
+  try {
+    const response = await apiFetch(`/v1/policy-versions/${versionId}/approve`, { method: "POST" });
+    if (!response.ok) throw new Error(await responseDetail(response, "批准失败"));
+    const version = await response.json();
+    await refreshGovernance(`版本 ${version.id.slice(0, 8)} 已批准并成为当前生效策略。`);
+  } catch (error) { $("#governance-status").textContent = error.message; }
+});
+
+$("#rollback-version").addEventListener("click", async () => {
+  const versionId = selectedVersionId();
+  if (!versionId) { $("#governance-status").textContent = "请先从版本历史中选中一个版本。"; return; }
+  try {
+    const response = await apiFetch(`/v1/policy-versions/${versionId}/rollback`, { method: "POST" });
+    if (!response.ok) throw new Error(await responseDetail(response, "创建回滚草稿失败"));
+    const version = await response.json();
+    state.draftVersion = version;
+    state.selectedVersion = version;
+    $("#policy-document").value = JSON.stringify(version.document, null, 2);
+    await loadPolicyVersions();
+    $("#governance-status").textContent = `已从 ${version.parent_id?.slice(0, 8) || "选中版本"} 创建回滚草稿 ${version.id.slice(0, 8)}。`;
+  } catch (error) { $("#governance-status").textContent = error.message; }
 });
 
 document.querySelectorAll("[data-example]").forEach((button) => {
