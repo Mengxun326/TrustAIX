@@ -68,6 +68,8 @@ class AuditFeedback(FeedbackRequest):
 class AuditEvent(EvaluationResult):
     prompt_length: int
     response_length: int
+    tenant_id: str = "default"
+    actor_id: str | None = None
     feedback: AuditFeedback | None = None
 
 

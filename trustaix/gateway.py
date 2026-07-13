@@ -57,13 +57,17 @@ class ChatGatewayService:
         self.evaluation_service = evaluation_service
         self.client = client
 
-    def complete(self, request: ChatCompletionRequest) -> dict[str, Any]:
+    def complete(
+        self, request: ChatCompletionRequest, tenant_id: str = "default", actor_id: str | None = None
+    ) -> dict[str, Any]:
         if request.stream:
             raise ValueError("Streaming is not supported because output must be evaluated before release.")
 
         prompt = "\n".join(text_from_content(message.content) for message in request.messages)
         input_evaluation = self.evaluation_service.evaluate(
-            EvaluationRequest(request_id=request.trustaix_request_id, prompt=prompt)
+            EvaluationRequest(request_id=request.trustaix_request_id, prompt=prompt),
+            tenant_id=tenant_id,
+            actor_id=actor_id,
         )
         if input_evaluation.action is Action.BLOCK:
             raise GatewayBlockedError(input_evaluation)
@@ -76,7 +80,9 @@ class ChatGatewayService:
         upstream_response = self.client.create_chat_completion(upstream_request.upstream_payload())
         response_text = _response_text(upstream_response)
         output_evaluation = self.evaluation_service.evaluate(
-            EvaluationRequest(request_id=request.trustaix_request_id, response=response_text)
+            EvaluationRequest(request_id=request.trustaix_request_id, response=response_text),
+            tenant_id=tenant_id,
+            actor_id=actor_id,
         )
 
         safe_response = deepcopy(upstream_response)

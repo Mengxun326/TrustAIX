@@ -114,6 +114,21 @@ $env:TRUSTAIX_POLICY_PATH = "config/policy.yaml"
 
 Copy this file before editing it for a specific deployment. For example, `rules.enabled` can limit enforcement to explicit rule IDs, while `enforcement.review_score` changes the aggregate score required for a review decision. With `TRUSTAIX_POLICY_PATH` set, the Risk Console can save the review threshold directly; other changes should be made in the YAML file and then the service restarted.
 
+## Authentication and tenant boundaries
+
+Local development remains open by default. In production, enable authentication and point to a private copy of [the access configuration example](config/access.example.yaml). The file maps each environment-held token to a tenant and role; it never contains the token value itself.
+
+```powershell
+Copy-Item config/access.example.yaml config/access.local.yaml
+$env:TRUSTAIX_AUTH_ENABLED = "true"
+$env:TRUSTAIX_AUTH_CONFIG = "config/access.local.yaml"
+$env:TRUSTAIX_DEVELOPER_TOKEN = "replace-with-a-long-random-token"
+$env:TRUSTAIX_AUDITOR_TOKEN = "replace-with-a-long-random-token"
+$env:TRUSTAIX_ADMIN_TOKEN = "replace-with-a-long-random-token"
+```
+
+Clients pass a token in `Authorization: Bearer <token>` or `X-API-Key`. Developers can submit evaluations; auditors can read their tenant's audit and analytics data; only admins can change policy. Audit events are stored and queried with their authenticated tenant ID.
+
 ## Run with Docker
 
 With `OPENAI_API_KEY` already set in your terminal, start a containerized gateway with:

@@ -23,10 +23,16 @@ class AuditRepository:
                 CREATE TABLE IF NOT EXISTS audit_events (
                     event_id TEXT PRIMARY KEY,
                     payload TEXT NOT NULL,
-                    evaluated_at TEXT NOT NULL
+                    evaluated_at TEXT NOT NULL,
+                    tenant_id TEXT NOT NULL DEFAULT 'default'
                 )
                 """
             )
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(audit_events)")}
+            if "tenant_id" not in columns:
+                connection.execute(
+                    "ALTER TABLE audit_events ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'"
+                )
             connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS audit_feedback (
@@ -41,23 +47,26 @@ class AuditRepository:
     def save(self, event: AuditEvent) -> None:
         with self._connect() as connection:
             connection.execute(
-                "INSERT INTO audit_events(event_id, payload, evaluated_at) VALUES (?, ?, ?)",
-                (event.event_id, event.model_dump_json(), event.evaluated_at),
+                "INSERT INTO audit_events(event_id, payload, evaluated_at, tenant_id) VALUES (?, ?, ?, ?)",
+                (event.event_id, event.model_dump_json(), event.evaluated_at, event.tenant_id),
             )
 
-    def latest(self, limit: int = 50) -> list[AuditEvent]:
+    def latest(self, limit: int = 50, tenant_id: str = "default") -> list[AuditEvent]:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT payload FROM audit_events ORDER BY evaluated_at DESC LIMIT ?", (limit,)
+                "SELECT payload FROM audit_events WHERE tenant_id = ? ORDER BY evaluated_at DESC LIMIT ?",
+                (tenant_id, limit),
             ).fetchall()
         events = [AuditEvent.model_validate(json.loads(row[0])) for row in rows]
         feedback = self._feedback_for([event.event_id for event in events])
         return [event.model_copy(update={"feedback": feedback.get(event.event_id)}) for event in events]
 
-    def add_feedback(self, event_id: str, feedback: FeedbackRequest) -> AuditFeedback | None:
+    def add_feedback(
+        self, event_id: str, feedback: FeedbackRequest, tenant_id: str = "default"
+    ) -> AuditFeedback | None:
         with self._connect() as connection:
             exists = connection.execute(
-                "SELECT 1 FROM audit_events WHERE event_id = ?", (event_id,)
+                "SELECT 1 FROM audit_events WHERE event_id = ? AND tenant_id = ?", (event_id, tenant_id)
             ).fetchone()
             if not exists:
                 return None
@@ -75,8 +84,8 @@ class AuditRepository:
             )
         return AuditFeedback(event_id=event_id, updated_at=updated_at, **feedback.model_dump())
 
-    def analytics(self, limit: int = 1_000) -> dict[str, object]:
-        events = self.latest(limit)
+    def analytics(self, limit: int = 1_000, tenant_id: str = "default") -> dict[str, object]:
+        events = self.latest(limit, tenant_id=tenant_id)
         actions = {action: 0 for action in ("allow", "review", "redact", "block")}
         categories: dict[str, int] = {}
         false_positives = 0

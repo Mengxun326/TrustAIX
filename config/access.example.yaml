@@ -1,0 +1,15 @@
+# Copy this file outside the repository (for example, config/access.local.yaml).
+# Keep token values in environment variables; never put secrets in this file.
+api_keys:
+  - id: developer-demo
+    tenant_id: demo-team
+    role: developer
+    token_env: TRUSTAIX_DEVELOPER_TOKEN
+  - id: auditor-demo
+    tenant_id: demo-team
+    role: auditor
+    token_env: TRUSTAIX_AUDITOR_TOKEN
+  - id: admin-demo
+    tenant_id: demo-team
+    role: admin
+    token_env: TRUSTAIX_ADMIN_TOKEN

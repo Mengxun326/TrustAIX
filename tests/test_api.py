@@ -3,8 +3,11 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from trustaix import main
+from trustaix.audit import AuditRepository
+from trustaix.auth import AuthService, Principal, Role
 from trustaix.config import load_policy_profile
 from trustaix.main import app
+from trustaix.service import EvaluationService
 
 client = TestClient(app)
 
@@ -81,3 +84,29 @@ def test_review_score_can_be_saved_to_active_policy_file(tmp_path: Path, monkeyp
         assert load_policy_profile(policy_file).review_score == 35
     finally:
         main.service.policy = original_policy
+
+
+def test_authentication_enforces_roles_and_tenant_boundaries(tmp_path: Path) -> None:
+    original_service = main.service
+    original_auth = main.auth_service
+    main.service = EvaluationService(AuditRepository(str(tmp_path / "audit.db")))
+    main.auth_service = AuthService(
+        enabled=True,
+        credentials={
+            "developer-a": Principal("developer-a", "tenant-a", Role.DEVELOPER),
+            "auditor-a": Principal("auditor-a", "tenant-a", Role.AUDITOR),
+            "auditor-b": Principal("auditor-b", "tenant-b", Role.AUDITOR),
+        },
+    )
+    try:
+        developer_headers = {"Authorization": "Bearer developer-a"}
+        assert client.post("/v1/evaluate", json={"prompt": "Hello"}, headers=developer_headers).status_code == 200
+        assert client.get("/v1/audit-events", headers=developer_headers).status_code == 403
+        assert client.get("/v1/audit-events", headers={"X-API-Key": "auditor-b"}).json() == []
+        audit_for_tenant_a = client.get("/v1/audit-events", headers={"X-API-Key": "auditor-a"})
+        assert audit_for_tenant_a.status_code == 200
+        assert len(audit_for_tenant_a.json()) == 1
+        assert audit_for_tenant_a.json()[0]["tenant_id"] == "tenant-a"
+    finally:
+        main.service = original_service
+        main.auth_service = original_auth

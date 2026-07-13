@@ -8,3 +8,4 @@ build/
 *.egg-info/
 trustaix.db
 .env
+config/access.local.yaml

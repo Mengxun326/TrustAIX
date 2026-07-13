@@ -16,7 +16,9 @@ class EvaluationService:
         self.policy = policy or load_policy_from_environment()
         self.detectors = (PromptInjectionDetector(), SensitiveDataDetector(), ContentPolicyDetector())
 
-    def evaluate(self, request: EvaluationRequest) -> EvaluationResult:
+    def evaluate(
+        self, request: EvaluationRequest, tenant_id: str = "default", actor_id: str | None = None
+    ) -> EvaluationResult:
         findings = []
         for location, text in (("prompt", request.prompt), ("response", request.response)):
             if text.strip():
@@ -33,6 +35,10 @@ class EvaluationService:
             evaluated_at=datetime.now(UTC).isoformat(),
             prompt_length=len(request.prompt),
             response_length=len(request.response),
+            tenant_id=tenant_id,
+            actor_id=actor_id,
         )
         self.audit_repository.save(event)
-        return EvaluationResult(**event.model_dump(exclude={"prompt_length", "response_length"}))
+        return EvaluationResult(
+            **event.model_dump(exclude={"prompt_length", "response_length", "tenant_id", "actor_id"})
+        )
