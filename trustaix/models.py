@@ -60,6 +60,11 @@ class FeedbackRequest(BaseModel):
     note: str = Field(default="", max_length=500)
 
 
+class PolicyVersionDraftRequest(BaseModel):
+    document: dict[str, Any]
+    note: str = Field(default="", max_length=500)
+
+
 class AuditFeedback(FeedbackRequest):
     event_id: str
     updated_at: str
@@ -70,6 +75,7 @@ class AuditEvent(EvaluationResult):
     response_length: int
     tenant_id: str = "default"
     actor_id: str | None = None
+    policy_version_id: str | None = None
     feedback: AuditFeedback | None = None
 
 

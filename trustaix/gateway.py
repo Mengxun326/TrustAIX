@@ -7,6 +7,7 @@ from typing import Any, Protocol
 import httpx
 
 from trustaix.models import Action, ChatCompletionRequest, EvaluationRequest, EvaluationResult
+from trustaix.config import PolicyProfile
 from trustaix.redaction import redact_content, text_from_content
 from trustaix.service import EvaluationService
 
@@ -58,7 +59,12 @@ class ChatGatewayService:
         self.client = client
 
     def complete(
-        self, request: ChatCompletionRequest, tenant_id: str = "default", actor_id: str | None = None
+        self,
+        request: ChatCompletionRequest,
+        tenant_id: str = "default",
+        actor_id: str | None = None,
+        policy: PolicyProfile | None = None,
+        policy_version_id: str | None = None,
     ) -> dict[str, Any]:
         if request.stream:
             raise ValueError("Streaming is not supported because output must be evaluated before release.")
@@ -68,6 +74,8 @@ class ChatGatewayService:
             EvaluationRequest(request_id=request.trustaix_request_id, prompt=prompt),
             tenant_id=tenant_id,
             actor_id=actor_id,
+            policy=policy,
+            policy_version_id=policy_version_id,
         )
         if input_evaluation.action is Action.BLOCK:
             raise GatewayBlockedError(input_evaluation)
@@ -83,6 +91,8 @@ class ChatGatewayService:
             EvaluationRequest(request_id=request.trustaix_request_id, response=response_text),
             tenant_id=tenant_id,
             actor_id=actor_id,
+            policy=policy,
+            policy_version_id=policy_version_id,
         )
 
         safe_response = deepcopy(upstream_response)

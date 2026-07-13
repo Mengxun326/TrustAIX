@@ -71,7 +71,7 @@ def test_analytics_and_feedback() -> None:
     assert analytics.json()["false_positives"] >= 1
 
 
-def test_review_score_can_be_saved_to_active_policy_file(tmp_path: Path, monkeypatch) -> None:
+def test_review_score_creates_and_activates_a_local_policy_version(tmp_path: Path, monkeypatch) -> None:
     policy_file = tmp_path / "policy.yaml"
     policy_file.write_text("enforcement:\n  review_score: 50\n", encoding="utf-8")
     original_policy = main.service.policy
@@ -81,7 +81,7 @@ def test_review_score_can_be_saved_to_active_policy_file(tmp_path: Path, monkeyp
         response = client.put("/v1/policy/review-score?review_score=35")
         assert response.status_code == 200
         assert response.json()["review_score"] == 35
-        assert load_policy_profile(policy_file).review_score == 35
+        assert response.json()["version"]["status"] == "active"
     finally:
         main.service.policy = original_policy
 
